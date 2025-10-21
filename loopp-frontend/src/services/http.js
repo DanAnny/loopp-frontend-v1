@@ -18,15 +18,15 @@ export const setOnTokenRefreshed = (fn) => {
 
 /* ---------------- Axios clients ---------------- */
 export const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  withCredentials: true,
+  baseURL: API_BASE_URL,         // e.g. https://loopp-backend-v1.onrender.com/api
+  withCredentials: true,         // REQUIRED so refresh cookie can be sent
   headers: { "Content-Type": "application/json" },
 });
 
 export const formClient = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
-  // DO NOT set Content-Type here; browser/axios sets multipart boundary
+  // no Content-Type; axios/browser sets the multipart boundary
 });
 
 /* Attach Authorization header from in-memory token */
@@ -35,13 +35,12 @@ const attachAuth = (config) => {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${accessToken}`;
   } else if (config.headers?.Authorization) {
-    // ensure header is not a stale token
     delete config.headers.Authorization;
   }
   return config;
 };
 
-// Tag requests so the retry uses the **same** client
+// Tag requests so the retry uses the SAME client
 apiClient.interceptors.request.use((cfg) => {
   cfg._clientTag = "api";
   return attachAuth(cfg);
@@ -51,19 +50,28 @@ formClient.interceptors.request.use((cfg) => {
   return attachAuth(cfg);
 });
 
-/* 401 refresh logic: try once, then fail */
+/* 401 refresh logic with de-duplication */
+let refreshingPromise = null;
+
+const callRefresh = () => {
+  // use the configured client (keeps baseURL, withCredentials)
+  return apiClient.post("/auth/refresh", {}); // will hit /api/auth/refresh
+};
+
 const onResponseError = async (error) => {
   const original = error.config || {};
   const status = error?.response?.status;
 
   if (status === 401 && !original._retry) {
     original._retry = true;
+
     try {
-      const { data } = await axios.post(
-        `${API_BASE_URL}/auth/refresh`,
-        {},
-        { withCredentials: true }
-      );
+      if (!refreshingPromise) {
+        refreshingPromise = callRefresh()
+          .finally(() => { refreshingPromise = null; });
+      }
+      const { data } = await refreshingPromise;
+
       if (data?.accessToken) {
         setAccessToken(data.accessToken);
         onTokenRefreshed && onTokenRefreshed(data.accessToken);
@@ -72,7 +80,7 @@ const onResponseError = async (error) => {
         original.headers = original.headers || {};
         original.headers.Authorization = `Bearer ${data.accessToken}`;
 
-        // 🔑 Use the SAME client that sent the original request
+        // Use the SAME client that sent the original request
         const client =
           original._clientTag === "form" ? formClient : apiClient;
 

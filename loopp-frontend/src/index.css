@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .grid-overlay-dark {
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.08) 1px, transparent 1px);
+    background-size: 18px 18px, 18px 18px;
+  }
+  .grid-overlay-light {
+    background-image:
+      linear-gradient(to right, rgba(2,6,23,0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(2,6,23,0.06) 1px, transparent 1px);
+    background-size: 18px 18px, 18px 18px;
+  }
+
+  /* Optional: 14px variant to match your old size */
+  .grid-overlay-light-14 {
+    background-image:
+      linear-gradient(to right, rgba(2,6,23,0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(2,6,23,0.06) 1px, transparent 1px);
+    background-size: 14px 14px, 14px 14px;
+  }
+}
+
+/* ==== Loopp UI tokens used by Sidebar/Topbar ==== */
+:root {
+  /* surfaces */
+  --sidebar: #0f172a;                 /* slate-900 */
+  --sidebar-foreground: #e5e7eb;      /* gray-200 */
+  --sidebar-border: rgba(255,255,255,0.08);
+  --sidebar-accent: rgba(255,255,255,0.06);
+  --sidebar-primary: #111827;         /* gray-900 tooltip bg */
+  --sidebar-primary-foreground: #f9fafb;
+
+  --background: #ffffff;
+  --foreground: #0f172a;
+
+  --border: #e5e7eb;
+  --accent: #f3f4f6;                  /* gray-100 hover */
+  --muted-foreground: #6b7280;
+
+  --popover: #ffffff;
+  --popover-foreground: #111827;
+  --input-background: #f8fafc;
+
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+}
+
+/* map tokens to utility classes */
+.bg-sidebar { background: var(--sidebar); }
+.text-sidebar-foreground { color: var(--sidebar-foreground); }
+.border-sidebar-border { border-color: var(--sidebar-border); }
+.bg-sidebar-accent { background: var(--sidebar-accent); }
+.bg-sidebar-primary { background: var(--sidebar-primary); }
+.text-sidebar-primary-foreground { color: var(--sidebar-primary-foreground); }
+
+.bg-background { background: var(--background); }
+.text-foreground { color: var(--foreground); }
+.border-border { border-color: var(--border); }
+.bg-accent { background: var(--accent); }
+.text-muted-foreground { color: var(--muted-foreground); }
+
+.bg-popover { background: var(--popover); }
+.text-popover-foreground { color: var(--popover-foreground); }
+.bg-input-background { background: var(--input-background); }
+
+.bg-destructive { background: var(--destructive); }
+.text-destructive-foreground { color: var(--destructive-foreground); }
+.text-destructive { color: var(--destructive); }
+.field-input { @apply w-full pl-11 pr-3 py-3 rounded-xl border border-black/20 bg-white focus:outline-none focus:border-black transition; }
+

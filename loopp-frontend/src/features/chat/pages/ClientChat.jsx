@@ -45,12 +45,25 @@ const roleToTheme = (role, isMine) => {
   return "client";
 };
 
+// Detect & shape for normal messages (including System-persisted)
 const shapeForClient = (m) => {
+  const created = m.createdAt || m.createdAtISO || m.timestamp || new Date().toISOString();
+  const attachments = Array.isArray(m.attachments) ? m.attachments : [];
+
+  // Persisted system messages (senderType === "System") render as inline notices
+  if (String(m.senderType || "").toLowerCase() === "system") {
+    return {
+      _id: m._id || `${Date.now()}-${Math.random()}`,
+      room: String(m.room?._id || m.room || ""),
+      inlineNotice: true,
+      noticeText: m.text || m.content || "",
+      createdAtISO: new Date(created).toISOString(),
+    };
+  }
+
   const rawRole = m.senderRole || m.role || (m.sender && (m.sender.role || m.sender.type)) || "";
   const role = normalizeRole(rawRole);
   const mine = !isStaff(role);
-
-  const created = m.createdAt || m.createdAtISO || m.timestamp || new Date().toISOString();
 
   const senderName =
     m.senderName ||
@@ -59,8 +72,6 @@ const shapeForClient = (m) => {
       : (m.sender && [m.sender.firstName, m.sender.lastName].filter(Boolean).join(" ")) ||
         role ||
         "PM/Engineer");
-
-  const attachments = Array.isArray(m.attachments) ? m.attachments : [];
 
   return {
     _id: m._id || m.id || `${Date.now()}-${Math.random()}`,
@@ -79,11 +90,11 @@ const shapeForClient = (m) => {
 const msgSignature = (m) =>
   [
     String(m.room || ""),
-    String(m.senderRole || ""),
-    String(m.isMine ? "1" : "0"),
-    (m.content || "").slice(0, 200),
+    String(m.inlineNotice ? "sys" : m.senderRole || ""),
+    String(m.inlineNotice ? "0" : m.isMine ? "1" : "0"),
+    (m.inlineNotice ? m.noticeText : m.content || "").slice(0, 200),
     (m.createdAtISO || "").slice(0, 19),
-    String(Array.isArray(m.attachments) ? m.attachments.length : 0),
+    m.inlineNotice ? "0" : String(Array.isArray(m.attachments) ? m.attachments.length : 0),
   ].join("|");
 
 function safeAppend(setMessages, incoming) {
@@ -95,6 +106,7 @@ function safeAppend(setMessages, incoming) {
 }
 
 function previewText(m) {
+  if (m.inlineNotice) return m.noticeText;
   if (m.attachments?.length && !m.content) return `📎 ${m.attachments.length} attachment(s)`;
   return m.content || "—";
 }
@@ -111,25 +123,24 @@ function InlineNotice({ text }) {
 }
 
 function noticeFromSystemEvent(ev = {}) {
-  // Map server system event -> inline text
   const type = String(ev.type || "").toLowerCase();
   const eng = ev.engineer || {};
-  const engName =
-    [eng.firstName, eng.lastName].filter(Boolean).join(" ").trim();
+  const engName = [eng.firstName, eng.lastName].filter(Boolean).join(" ").trim();
 
   switch (type) {
     case "pm_assigned":
-      return "A PM HAS BEEN ASSIGNED";
+      return "----- A PM HAS BEEN ASSIGNED -----";
     case "pm_online":
-      return "PM IS ACTIVELY ONLINE";
+      return "----- PM IS ACTIVELY ONLINE -----";
     case "pm_assigned_engineer":
-      return `PM HAS ASSIGNED THE PROJECT TO AN ENGINEER${engName ? ` — (${engName})` : ""}`;
+      return `----- PM HAS ASSIGNED THE PROJECT TO AN ENGINEER${engName ? ` — (${engName})` : ""} -----`;
     case "engineer_accepted":
-      return "ENGINEER HAS ACCEPTED THE TASK AND WILL BE JOINING THE ROOM";
+      return "----- ENGINEER HAS ACCEPTED THE TASK AND WILL BE JOINING THE ROOM -----";
     case "engineer_joined":
-      return "ENGINEER IS IN THE ROOM";
     case "engineer_online":
-      return "ENGINEER IS IN THE ROOM";
+      return "----- ENGINEER IS IN THE ROOM -----";
+    case "inline":
+      return ev.text || "";
     default:
       return "";
   }
@@ -193,7 +204,7 @@ function RatingSheet({ requestId, onClose, onRated }) {
         coordinationScore: teamScore,
         coordinationComment: coordComment,
       });
-      onRated?.(); // close + toast handled by parent
+      onRated?.();
     } catch (e) {
       setErr(e?.response?.data?.message || e?.message || "Failed to submit rating");
     } finally {
@@ -308,12 +319,11 @@ export default function ClientChat() {
 
   // rating sheet state
   const [ratingOpen, setRatingOpen] = useState(false);
-  const [hasRated, setHasRated] = useState(false); // local guard to block re-opening after success
+  const [hasRated, setHasRated] = useState(false);
 
   // reopen state for the active room
   const [reopenRequested, setReopenRequested] = useState(false);
 
-  // ✅ typingText (shown in header and below composer)
   const typingText = useMemo(() => {
     if (!activeRoomId) return "";
     const map = typingByRoom[activeRoomId] || {};
@@ -329,7 +339,6 @@ export default function ClientChat() {
   const scrollerRef = useRef(null);
   const atBottomRef = useRef(true);
 
-  // keep track of user scroll position (prevents yank-to-bottom)
   const handleScroll = () => {
     const el = scrollerRef.current;
     if (!el) return;
@@ -387,7 +396,7 @@ export default function ClientChat() {
     })();
   }, []);
 
-  // join active room + messages + header status + LIVE room open/close + system listeners
+  // join room + load messages + listeners
   useEffect(() => {
     if (!activeRoomId) return;
     const active = rooms.find((r) => r.id === activeRoomId);
@@ -399,11 +408,10 @@ export default function ClientChat() {
       try {
         setErr("");
 
-        const res = await fetchClientRoomMessages(activeRoomId, { limit: 100 });
+        const res = await fetchClientRoomMessages(activeRoomId, { limit: 200 });
         const shaped = (res?.messages || []).map(shapeForClient);
         setMessages(shaped);
 
-        // fetch meta so we know reopenRequested
         let closed = Boolean(active?.isClosed === true || active?.isClosed === "true");
         let reopen = false;
         try {
@@ -420,7 +428,6 @@ export default function ClientChat() {
         });
         setReopenRequested(reopen);
 
-        // message scroller only
         const el = scrollerRef.current;
         if (el) {
           el.addEventListener("scroll", handleScroll, { passive: true });
@@ -437,7 +444,9 @@ export default function ClientChat() {
         const onMessage = (m) => {
           const rid = String(m.room?._id || m.room);
 
+          // Shape persisted messages (includes System)
           const shapedMsg = shapeForClient(m);
+
           setRooms((prev) => {
             const idx = prev.findIndex((x) => String(x.id) === rid);
             if (idx === -1) return prev;
@@ -454,7 +463,7 @@ export default function ClientChat() {
 
           safeAppend(setMessages, shapedMsg);
 
-          if (atBottomRef.current || shapedMsg.isMine) {
+          if (atBottomRef.current || shapedMsg.isMine || shapedMsg.inlineNotice) {
             requestAnimationFrame(() => {
               scrollerRef.current?.scrollTo({
                 top: scrollerRef.current.scrollHeight,
@@ -478,7 +487,7 @@ export default function ClientChat() {
           });
         };
 
-        // 🔔 Inline system events -> render as dashed notices
+        // For any ephemeral "system" (just in case), mirror as inline (non-persistent)
         const onSystem = (payload = {}) => {
           const rid = String(payload.roomId || payload.room || "");
           if (rid && rid !== String(activeRoomId)) return;
@@ -494,9 +503,7 @@ export default function ClientChat() {
             createdAtISO: payload.timestamp || new Date().toISOString(),
           };
 
-          setRooms((prev) => prev); // no sidebar changes for inline
           setMessages((prev) => {
-            // avoid duplicates of identical consecutive notices
             const last = prev[prev.length - 1];
             if (last?.inlineNotice && last.noticeText === label) return prev;
             return [...prev, msg];
@@ -512,7 +519,6 @@ export default function ClientChat() {
           }
         };
 
-        // 🔒 Listen for room open/close events and update UI immediately
         const onRoomClosed = (payload = {}) => {
           const rid = String(payload.roomId || payload.room || "");
           if (rid && rid !== String(activeRoomId)) return;
@@ -531,15 +537,11 @@ export default function ClientChat() {
           setRooms((prev) =>
             prev.map((r) => (String(r.id) === String(activeRoomId) ? { ...r, isClosed: false } : r))
           );
-          // reset request flag when reopened
           setReopenRequested(false);
-
-          // if someone is typing, header will show that; otherwise "Online"
           setHeader((h) => ({ ...h, status: "Online" }));
           setToast({ text: "This room has been reopened.", kind: "ok" });
         };
 
-        // when *we* or another client instance requests reopen
         const onReopenRequested = (payload = {}) => {
           const rid = String(payload.roomId || payload.room || "");
           if (rid && rid !== String(activeRoomId)) return;
@@ -547,7 +549,6 @@ export default function ClientChat() {
           setToast({ text: "Reopen request sent.", kind: "ok" });
         };
 
-        // ensure no dup listeners
         s.off("message", onMessage);
         s.off("typing", onTyping);
         s.off("system", onSystem);
@@ -638,7 +639,6 @@ export default function ClientChat() {
       if (res?.message) {
         const shaped = shapeForClient(res.message);
         safeAppend(setMessages, shaped);
-        // update sidebar preview for active room
         setRooms((prev) =>
           prev.map((r) =>
             r.id === activeRoomId ? { ...r, lastMessage: previewText(shaped), updatedAtISO: new Date().toISOString() } : r
@@ -691,7 +691,6 @@ export default function ClientChat() {
       await Projects.requestReopen({ requestId: reqId });
       setReopenRequested(true);
       setToast({ text: "Reopen request sent to your PM.", kind: "ok" });
-      // backend also emits "reopen:requested" to the room for PM side
     } catch (e) {
       setToast({ text: e?.response?.data?.message || e?.message || "Failed to request reopen", kind: "error" });
     }
@@ -721,7 +720,7 @@ export default function ClientChat() {
 
       {/* -------------- Two-column app area (independent scroll) -------------- */}
       <div className="h-[calc(100vh-48px)] md:h-[calc(100vh-56px)] flex bg-white text-black overflow-hidden">
-        {/* Sidebar: its own scroll container */}
+        {/* Sidebar */}
         <aside className="hidden sm:flex w-80 max-w-[22rem] flex-col border-r border-black/10 overflow-y-auto">
           <ConversationList
             conversations={rooms.map((r) => ({
@@ -745,9 +744,8 @@ export default function ClientChat() {
           />
         </aside>
 
-        {/* Chat column: header sticky, messages scroll, composer sticky */}
+        {/* Chat column */}
         <section className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          {/* Header sticky so name/search area stays fixed */}
           <div className="sticky top-0 z-30 bg-white border-b border-black/10">
             <ChatHeader
               contact={{
@@ -758,12 +756,10 @@ export default function ClientChat() {
             />
           </div>
 
-          {/* Closed banner with Request Reopen button (client view) */}
+          {/* Closed banner */}
           {active?.isClosed && (
             <div className="sticky top-[48px] md:top-[56px] z-20 bg-white/95 border-b border-black/10 px-3 md:px-4 py-2 flex items-center justify-between gap-2">
-              <div className="text-sm text-black/60">
-                This room is closed.
-              </div>
+              <div className="text-sm text-black/60">This room is closed.</div>
               {!reopenRequested ? (
                 <button
                   onClick={handleRequestReopen}
@@ -779,7 +775,7 @@ export default function ClientChat() {
             </div>
           )}
 
-          {/* Messages — ONLY scroller in the chat column */}
+          {/* Messages */}
           <div ref={scrollerRef} className="flex-1 overflow-y-auto p-3 md:p-4 lg:p-6 bg-white">
             {activeRoomId && active?.hasRoom ? (
               messages.map((m) =>
@@ -796,7 +792,7 @@ export default function ClientChat() {
             )}
           </div>
 
-          {/* Composer pinned (does not scroll out) */}
+          {/* Composer */}
           <div className="sticky bottom-0 border-t border-black/10 bg-white">
             <div className="max-w-6xl mx-auto px-3 md:px-4 py-2">
               <ChatInput
@@ -805,7 +801,6 @@ export default function ClientChat() {
                 typingText=""
                 disabled={Boolean(active?.isClosed)}
               />
-              {/* Typing hint below composer (not inside it) */}
               <div className="mt-1 h-6">
                 {typingText && header.status !== "Closed" && (
                   <div className="inline-flex items-center gap-2 rounded-full border border-black/15 bg-white px-3 py-1 text-xs text-black/70">
@@ -819,7 +814,7 @@ export default function ClientChat() {
         </section>
       </div>
 
-      {/* Rating sheet (opens only via /rate & status === Review) */}
+      {/* Rating sheet */}
       {ratingOpen && requestIdForRating && (
         <RatingSheet
           requestId={requestIdForRating}

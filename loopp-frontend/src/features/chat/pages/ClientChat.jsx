@@ -99,6 +99,42 @@ function previewText(m) {
   return m.content || "—";
 }
 
+/* ------------------ Inline notice UI ------------------ */
+function InlineNotice({ text }) {
+  return (
+    <div className="my-3 flex items-center justify-center">
+      <div className="w-full text-center text-[11px] md:text-xs tracking-wide text-black/65">
+        {"—".repeat(6)} <span className="font-semibold uppercase">{text}</span> {"—".repeat(6)}
+      </div>
+    </div>
+  );
+}
+
+function noticeFromSystemEvent(ev = {}) {
+  // Map server system event -> inline text
+  const type = String(ev.type || "").toLowerCase();
+  const eng = ev.engineer || {};
+  const engName =
+    [eng.firstName, eng.lastName].filter(Boolean).join(" ").trim();
+
+  switch (type) {
+    case "pm_assigned":
+      return "A PM HAS BEEN ASSIGNED";
+    case "pm_online":
+      return "PM IS ACTIVELY ONLINE";
+    case "pm_assigned_engineer":
+      return `PM HAS ASSIGNED THE PROJECT TO AN ENGINEER${engName ? ` — (${engName})` : ""}`;
+    case "engineer_accepted":
+      return "ENGINEER HAS ACCEPTED THE TASK AND WILL BE JOINING THE ROOM";
+    case "engineer_joined":
+      return "ENGINEER IS IN THE ROOM";
+    case "engineer_online":
+      return "ENGINEER IS IN THE ROOM";
+    default:
+      return "";
+  }
+}
+
 /* ------------------ Rating UI ------------------ */
 function Stars({ value, onChange, label }) {
   return (
@@ -351,7 +387,7 @@ export default function ClientChat() {
     })();
   }, []);
 
-  // join active room + messages + header status + LIVE room open/close listeners
+  // join active room + messages + header status + LIVE room open/close + system listeners
   useEffect(() => {
     if (!activeRoomId) return;
     const active = rooms.find((r) => r.id === activeRoomId);
@@ -442,6 +478,40 @@ export default function ClientChat() {
           });
         };
 
+        // 🔔 Inline system events -> render as dashed notices
+        const onSystem = (payload = {}) => {
+          const rid = String(payload.roomId || payload.room || "");
+          if (rid && rid !== String(activeRoomId)) return;
+
+          const label = noticeFromSystemEvent(payload);
+          if (!label) return;
+
+          const msg = {
+            _id: `sys-${payload.type}-${payload.timestamp || Date.now()}-${Math.random()}`,
+            room: rid || String(activeRoomId),
+            inlineNotice: true,
+            noticeText: label,
+            createdAtISO: payload.timestamp || new Date().toISOString(),
+          };
+
+          setRooms((prev) => prev); // no sidebar changes for inline
+          setMessages((prev) => {
+            // avoid duplicates of identical consecutive notices
+            const last = prev[prev.length - 1];
+            if (last?.inlineNotice && last.noticeText === label) return prev;
+            return [...prev, msg];
+          });
+
+          if (atBottomRef.current) {
+            requestAnimationFrame(() => {
+              scrollerRef.current?.scrollTo({
+                top: scrollerRef.current.scrollHeight,
+                behavior: "smooth",
+              });
+            });
+          }
+        };
+
         // 🔒 Listen for room open/close events and update UI immediately
         const onRoomClosed = (payload = {}) => {
           const rid = String(payload.roomId || payload.room || "");
@@ -480,12 +550,14 @@ export default function ClientChat() {
         // ensure no dup listeners
         s.off("message", onMessage);
         s.off("typing", onTyping);
+        s.off("system", onSystem);
         s.off("room:closed", onRoomClosed);
         s.off("room:reopened", onRoomReopened);
         s.off("reopen:requested", onReopenRequested);
 
         s.on("message", onMessage);
         s.on("typing", onTyping);
+        s.on("system", onSystem);
         s.on("room:closed", onRoomClosed);
         s.on("room:reopened", onRoomReopened);
         s.on("reopen:requested", onReopenRequested);
@@ -494,6 +566,7 @@ export default function ClientChat() {
           try {
             s.off("message", onMessage);
             s.off("typing", onTyping);
+            s.off("system", onSystem);
             s.off("room:closed", onRoomClosed);
             s.off("room:reopened", onRoomReopened);
             s.off("reopen:requested", onReopenRequested);
@@ -709,7 +782,13 @@ export default function ClientChat() {
           {/* Messages — ONLY scroller in the chat column */}
           <div ref={scrollerRef} className="flex-1 overflow-y-auto p-3 md:p-4 lg:p-6 bg-white">
             {activeRoomId && active?.hasRoom ? (
-              messages.map((m) => <MessageBubble key={m._id} message={m} />)
+              messages.map((m) =>
+                m.inlineNotice ? (
+                  <InlineNotice key={m._id} text={m.noticeText} />
+                ) : (
+                  <MessageBubble key={m._id} message={m} />
+                )
+              )
             ) : (
               <div className="h-full w-full grid place-items-center text-black/60">
                 Waiting for a PM to join — we’ll connect you automatically.

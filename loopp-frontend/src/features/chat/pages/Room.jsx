@@ -601,13 +601,13 @@ export default function Room() {
         <div className="max-w-6xl mx-auto px-3 md:px-4 h-12 md:h-14 flex items-center justify-between">
           <Link
             to="/"
-            className="backlink inline-flex items-center gap-2 px-2 py-1 rounded-full text-sm font-medium hover:bg-muted focus-visible:bg-muted transition"
+            className="bg-black backlink inline-flex items-center gap-2 px-2 py-1 rounded-full text-sm font-medium hover:bg-muted focus-visible:bg-muted transition"
             title="Back"
           >
-            <span className="ico text-foreground/80">
+            <span className="ico text-white/80">
               <BackIcon />
             </span>
-            <span className="hidden sm:inline">Back</span>
+            <span className="hidden sm:inline text-white">Back to Dashboard</span>
           </Link>
           <div className="text-sm text-muted-foreground px-2 truncate">Team Chat</div>
 

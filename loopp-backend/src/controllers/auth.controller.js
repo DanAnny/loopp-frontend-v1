@@ -1,49 +1,68 @@
+// src/controllers/auth.controller.js
 import * as authService from "../services/auth.service.js";
 import * as userService from "../services/user.service.js";
 import { fromReq } from "../services/audit.service.js";
-import { User } from "../models/User.js"; // ← for client signup via passport-local-mongoose
+import { User } from "../models/User.js";
+import { config } from "../config/env.js";
+
+// Treat Render/HTTPS as prod for cookies
+const isProd =
+  process.env.NODE_ENV === "production" ||
+  process.env.RENDER === "true"; // Render sets this
+
+// Helper to set cross-site refresh cookie the SAME way everywhere
+function setRefreshCookie(res, token) {
+  res.cookie("refreshToken", token, {
+    httpOnly: true,
+    secure: true, // true on Render (HTTPS). For local dev over http, set to false.
+    sameSite: "none", 
+    partitioned: true,                   // required for Vercel ↔ Render cross-site
+    path: "/api/auth/refresh",
+    maxAge: 14 * 24 * 60 * 60 * 1000,    // 14 days
+  });
+}
 
 export const signUpSuperAdmin = async (req, res) => {
   try {
     const { email, password, phone, firstName, lastName, gender } = req.body;
-    const user = await authService.registerSuperAdmin(email, password, phone, firstName, lastName, gender);
+    const user = await authService.registerSuperAdmin(
+      email,
+      password,
+      phone,
+      firstName,
+      lastName,
+      gender
+    );
     res.status(201).json({ success: true, message: "SuperAdmin created", user });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message });
   }
 };
 
-// NEW: public client signup (no role)
+// Public client signup (no role)
 export const signUpClient = async (req, res) => {
   try {
     const { email, password, phone, firstName, lastName, gender } = req.body;
 
     if (!email || !password || !firstName || !lastName || !phone || !gender) {
-      return res.status(400).json({ success: false, message: "Missing required fields" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing required fields" });
     }
 
-    // passport-local-mongoose:
     const user = new User({
       email,
       firstName,
       lastName,
       phone,
-      gender,       // 'Male' | 'Female'
-      role: undefined, // explicitly no role for clients
+      gender,
+      role: undefined,
     });
 
     await User.register(user, password);
 
-    // issue tokens same as signIn
     const { accessToken, refreshToken } = await authService.createTokens(user);
-
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/api/auth/refresh",
-      maxAge: 14 * 24 * 60 * 60 * 1000,
-    });
+    setRefreshCookie(res, refreshToken);
 
     return res.status(201).json({
       success: true,
@@ -70,11 +89,29 @@ export const addUser = async (req, res) => {
 
     let user;
     if (req.user.role === "SuperAdmin") {
-      user = await authService.addUserBySuperAdmin(email, role, phone, firstName, lastName, gender);
+      user = await authService.addUserBySuperAdmin(
+        email,
+        role,
+        phone,
+        firstName,
+        lastName,
+        gender
+      );
     } else if (req.user.role === "Admin") {
-      user = await userService.adminAddStaff({ creator: req.user, email, role, phone, firstName, lastName, gender }, fromReq(req));
+      user = await userService.adminAddStaff(
+        {
+          creator: req.user,
+          email,
+          role,
+          phone,
+          firstName,
+          lastName,
+          gender,
+        },
+        fromReq(req)
+      );
     } else {
-      return res.status(403).json({ success:false, message:"Forbidden" });
+      return res.status(403).json({ success: false, message: "Forbidden" });
     }
 
     res.status(201).json({ success: true, message: "User added", user });
@@ -88,10 +125,9 @@ export const signIn = async (req, res) => {
     const { email, password } = req.body;
     const user = await authService.authenticateUser(email, password);
     const { accessToken, refreshToken } = await authService.createTokens(user);
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true, secure: process.env.NODE_ENV === "production",
-      sameSite: "lax", path: "/api/auth/refresh", maxAge: 14*24*60*60*1000,
-    });
+
+    setRefreshCookie(res, refreshToken);
+
     res.json({
       success: true,
       accessToken,
@@ -103,7 +139,7 @@ export const signIn = async (req, res) => {
         phone: user.phone,
         gender: user.gender,
         role: user.role || null,
-      }
+      },
     });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message });
@@ -114,11 +150,14 @@ export const refreshToken = async (req, res) => {
   try {
     const token = req.cookies.refreshToken;
     if (!token) throw new Error("No refresh token provided");
-    const { accessToken, refreshToken } = await authService.refreshAccessToken(token);
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true, secure: process.env.NODE_ENV === "production",
-      sameSite: "lax", path: "/api/auth/refresh", maxAge: 14*24*60*60*1000,
-    });
+
+    const { accessToken, refreshToken } = await authService.refreshAccessToken(
+      token
+    );
+
+    // rotate cookie
+    setRefreshCookie(res, refreshToken);
+
     res.json({ success: true, accessToken });
   } catch (err) {
     res.status(401).json({ success: false, message: err.message });
@@ -129,7 +168,16 @@ export const logout = async (req, res) => {
   try {
     const token = req.cookies.refreshToken;
     if (token) await authService.logoutUser(token);
-    res.clearCookie("refreshToken", { path: "/api/auth/refresh" });
+
+    // clear with same attributes
+    res.clearCookie("refreshToken", {
+      path: "/api/auth/refresh",
+      secure: true,
+      sameSite: "none",
+      partitioned: true,
+      httpOnly: true,
+    });
+
     res.json({ success: true, message: "Logged out successfully" });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message });

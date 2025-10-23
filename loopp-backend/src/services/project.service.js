@@ -92,6 +92,21 @@ export const createProjectRequestAndAssignPM = async (payload, auditMeta = {}) =
     request.chatRoom = room._id;
     await request.save();
 
+    // 🔔 Assignment notice MUST appear BEFORE the default greeting
+    try {
+      const pmUser = await User.findById(pm._id).lean();
+      const pmName =
+        [pmUser?.firstName, pmUser?.lastName].filter(Boolean).join(" ") || "PM";
+
+      // Persist a message stating the PM assignment (appears before greeting)
+      await Message.create({
+        room: room._id,
+        senderType: "User", // keep schema consistent
+        sender: pm._id,     // attribute to the PM account
+        text: `${pmName} HAS BEEN ASSIGNED TO BE YOUR PM.`,
+      });
+    } catch (_) {}
+
     // Default greeting from the PM (visible to client when they join)
     try {
       const pmUser = await User.findById(pm._id).lean();
@@ -512,4 +527,4 @@ export const reopenRoomAndResume = async (requestId, pmUser, auditMeta = {}) => 
   } catch {}
 
   return req;
-}
+};

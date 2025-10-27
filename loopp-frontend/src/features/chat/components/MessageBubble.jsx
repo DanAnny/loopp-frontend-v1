@@ -38,7 +38,6 @@ function ImageThumb({ url, alt }) {
 const urlRegex = /https?:\/\/[^\s)]+/gi;
 
 function isStripeInvoiceUrl(u) {
-  // handles invoice.stripe.com/i/... and pay.stripe.com/invoice/...
   return /(invoice\.stripe\.com\/i\/|pay\.stripe\.com\/invoice\/)/i.test(u);
 }
 
@@ -50,7 +49,6 @@ function shortenUrl(u) {
     if (path.length > 18) path = path.slice(0, 17) + "…";
     return `${host}${path}`;
   } catch {
-    // fallback: show very short piece
     return u.length > 28 ? u.slice(0, 27) + "…" : u;
   }
 }
@@ -58,6 +56,7 @@ function shortenUrl(u) {
 function labelForUrl(u) {
   if (isStripeInvoiceUrl(u)) {
     return <span className="no-underline text-red-500 underline-offset-0">Pay</span>;
+    // return "Pay";
   }
   return shortenUrl(u);
 }
@@ -79,7 +78,7 @@ function renderWithLinks(text) {
         href={url}
         target="_blank"
         rel="noreferrer"
-        className="break-words"
+        className="break-words underline"
         title={url}
       >
         {labelForUrl(url)}
@@ -95,21 +94,24 @@ function renderWithLinks(text) {
 
 /**
  * message = {
- *   _id, content, timestamp, isMine, senderRole, senderName,
+ *   _id, content, timestamp, isMine, senderRole, senderName, bubbleTheme? ("system"|"pm"...)
  *   attachments: [{ fileId, filename, contentType, length }]
  * }
  */
 export default function MessageBubble({ message }) {
   const sent = !!message.isMine;
 
-  // role-based colors for incoming bubbles
+  // role-based colors for incoming bubbles (neutral & readable with black/white UI)
   const roleColors = {
+    System: "bg-amber-50 text-amber-900 border border-amber-200",     // 🍮 cream system bubble
     PM: "bg-gray-200 text-gray-900",
     Engineer: "bg-indigo-100 text-indigo-900",
     Client: "bg-emerald-100 text-emerald-900",
     User: "bg-muted text-foreground",
   };
-  const incomingClass = roleColors[message.senderRole] || roleColors.User;
+
+  const roleKey = message.senderRole || (message.bubbleTheme === "system" ? "System" : "User");
+  const incomingClass = roleColors[roleKey] || roleColors.User;
 
   const bubbleClass = sent
     ? "bg-foreground text-background ml-auto rounded-br-md"
@@ -123,9 +125,10 @@ export default function MessageBubble({ message }) {
           transition-all duration-200 hover:shadow-md ${bubbleClass}
         `}
       >
+        {/* header/meta: for system, show only "System" (no bullet) */}
         {!sent && (
           <div className="text-[10px] opacity-70 mb-1">
-            {message.senderName} • {message.senderRole}
+            {roleKey === "System" ? "System" : `${message.senderName} • ${message.senderRole}`}
           </div>
         )}
 
@@ -149,7 +152,6 @@ export default function MessageBubble({ message }) {
                     sent ? "border-background/30" : "border-foreground/20"
                   }`}
                 >
-                  {/* Thumbnail for images */}
                   {isImage(a.contentType) ? (
                     <a href={previewUrl} target="_blank" rel="noreferrer" className="shrink-0" title="Preview">
                       <ImageThumb url={previewUrl} alt={a.filename} />
@@ -167,7 +169,6 @@ export default function MessageBubble({ message }) {
                     </div>
                   </div>
 
-                  {/* Actions: Preview (inline for images/PDF), Download */}
                   <div className="flex items-center gap-1">
                     {(isImage(a.contentType) || isPdf(a.contentType)) && (
                       <a

@@ -1,4 +1,3 @@
-// frontend/src/components/layout/Topbar.jsx
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -53,17 +52,16 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
   const [showSignout, setShowSignout] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
-  const [unreadMsgs, setUnreadMsgs] = useState(0);     // chat ping badge (total across rooms)
-  const [items, setItems] = useState([]);              // notifications list
+  const [unreadMsgs, setUnreadMsgs] = useState(0);
+  const [items, setItems] = useState([]);
   const [nextCursor, setNextCursor] = useState(null);
   const [loadingNotifs, setLoadingNotifs] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);   // 🔔 numeric badge (notifications)
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const notificationRef = useRef(null);
   const profileRef = useRef(null);
 
   const first = user?.firstName || user?.first_name || "";
-  0
   const last  = user?.lastName  || user?.last_name  || "";
   const name = [first, last].filter(Boolean).join(" ") || "User";
   const initials = `${(first[0] || "").toUpperCase()}${(last[0] || "").toUpperCase()}` || "U";
@@ -85,7 +83,6 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
     if (!s) return;
     const recalc = () => setUnreadMsgs(totalChatUnread(userId));
     s.on("notify:message", recalc);
-    // initialize on mount
     recalc();
     return () => s.off("notify:message", recalc);
   }, [userId]);
@@ -176,9 +173,14 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
     }
   };
 
+  /* ✅ HARD LOGOUT: emit socket + call API (with cookies) */
   const onSignOut = async () => {
     setSigningOut(true);
     try {
+      const s = connectSocket(userId);
+      s?.emit("auth:logout");           // immediate presence update on server
+      await new Promise((r) => setTimeout(r, 150)); // tiny grace to flush frame
+
       await dispatch(logoutThunk()).unwrap?.();
       navigate("/signin", { replace: true });
     } finally {
@@ -220,7 +222,7 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
   const onMarkAll = async () => {
     try {
       await markAllNotificationsRead();
-    setItems((prev) => prev.map((x) => ({ ...x, readAt: x.readAt || new Date().toISOString() })));
+      setItems((prev) => prev.map((x) => ({ ...x, readAt: x.readAt || new Date().toISOString() })));
       setUnreadCount(0);
     } catch {}
   };
@@ -383,7 +385,7 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
                 isSuperAdmin ? "hover:bg-white/10 text-white" : "hover:bg-black/5 text-black"
               }`}
               aria-label="Messages"
-              onClick={() => setUnreadMsgs(totalChatUnread(userId))} // refresh, but don't forcibly clear
+              onClick={() => setUnreadMsgs(totalChatUnread(userId))}
             >
               <MessageSquare className="w-5 h-5" />
               {unreadMsgs > 0 && (

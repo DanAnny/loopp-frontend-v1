@@ -22,14 +22,17 @@ export const setOnTokenRefreshed = (fn) => {
 
 /* ---------------- Axios clients ---------------- */
 export const apiClient = axios.create({
-  baseURL: API_BASE_URL,         // e.g. https://loopp-backend-v1.onrender.com/api
-  withCredentials: true,         // REQUIRED so refresh cookie can be sent
+  baseURL: API_BASE_URL,        // e.g. https://loopp-backend-v1.onrender.com/api
+  withCredentials: true,        // REQUIRED so refresh cookie is sent
   headers: { "Content-Type": "application/json" },
+  // optional: short timeouts are helpful in logout flows
+  timeout: 200000,
 });
 
 export const formClient = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
+  timeout: 200000,
   // no Content-Type; axios/browser sets the multipart boundary
 });
 
@@ -41,10 +44,8 @@ const attachAuth = (config) => {
   if (accessToken) {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${accessToken}`;
-    // mark that this request was authenticated
     config._hadAuth = true;
   } else {
-    // ensure we don't leak a stale header and mark as public
     if (config.headers?.Authorization) delete config.headers.Authorization;
     config._hadAuth = false;
   }
@@ -66,7 +67,7 @@ let refreshingPromise = null;
 
 const callRefresh = () => {
   // use the configured client (keeps baseURL, withCredentials)
-  return apiClient.post("/auth/refresh", {}); // hits /api/auth/refresh
+  return apiClient.post("/auth/refresh", {});
 };
 
 const onResponseError = async (error) => {
@@ -75,8 +76,7 @@ const onResponseError = async (error) => {
 
   // Never try to refresh for auth endpoints themselves
   const url = String(original.url || "");
-  const isAuthEndpoint =
-    /\/auth\/(signin|signup|customer\/signup|logout|refresh)\b/.test(url);
+  const isAuthEndpoint = /\/auth\/(signin|signup|customer\/signup|logout|refresh)\b/.test(url);
 
   // Only consider refreshing when the original request was authenticated
   const hadAuth =
@@ -106,7 +106,7 @@ const onResponseError = async (error) => {
         return client(original);
       }
     } catch {
-      // refresh failed; drop token so UI can react (e.g., to login)
+      // refresh failed; drop token so UI can react (e.g., redirect to login)
       clearAccessToken();
     }
   }

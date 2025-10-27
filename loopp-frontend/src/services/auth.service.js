@@ -9,7 +9,9 @@ export const addUser = (body) => apiClient.post("/auth/add-user", body);
 
 export const refresh = () => apiClient.post("/auth/refresh");
 
-export const logout = () => apiClient.post("/auth/logout");
+export const logout = () =>
+  // must be POST and withCredentials=true (handled by apiClient)
+  apiClient.post("/auth/logout");
 
 // plain sign-in; caller handles token
 export const signIn = async (body) => {

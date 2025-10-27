@@ -6,7 +6,6 @@ import { Link } from "react-router-dom";
 import { connectSocket, getSocket, joinRoom } from "@/lib/socket";
 import chatApi from "@/services/chat.service";
 import projects from "@/services/projects.service";
-// import zoom from "@/services/zoom.service";
 import invoices from "@/services/invoice.service";
 
 import ConversationList from "../components/ConversationList";
@@ -54,6 +53,7 @@ const shortName = (s, m = 28) => {
 const norm = (r = "") => (r || "").toString();
 function normalizeRole(r = "") {
   const s = norm(r);
+  if (/system/i.test(s)) return "System";
   if (/super\s*admin/i.test(s)) return "SuperAdmin";
   if (/admin/i.test(s) && !/super/i.test(s)) return "Admin";
   if (/pm|project\s*manager/i.test(s)) return "PM";
@@ -62,6 +62,7 @@ function normalizeRole(r = "") {
   return "User";
 }
 function roleToTheme(role, isMine) {
+  if (role === "System") return "system";
   if (isMine) return "me";
   if (role === "Client") return "client";
   if (role === "PM") return "pm";
@@ -75,6 +76,11 @@ function previewText(m) {
   return m.content || "—";
 }
 function normalizeIncoming(m, meId) {
+  // Drop client-only system messages for staff
+  if (String(m.senderType || "").toLowerCase() === "system" && String(m.visibleTo || "All") === "Client") {
+    return null;
+  }
+
   const senderId =
     typeof m.sender === "string" ? m.sender : m.sender?._id || m.sender?.id || "";
   const isMine = senderId && String(senderId) === String(meId);
@@ -283,7 +289,9 @@ export default function Room() {
         // messages
         const { data } = await chatApi.getMessages(activeRoomId);
         const list = Array.isArray(data?.messages) ? data.messages : [];
-        const normalized = list.map((m) => normalizeIncoming(m, userId));
+        const normalized = list
+          .map((m) => normalizeIncoming(m, userId))
+          .filter(Boolean); // drop client-only system bubbles here defensively
         setMessages(normalized);
 
         // project meta
@@ -309,9 +317,10 @@ export default function Room() {
               ...full,
               _id: full?._id || full?.id || metaProject?._id || null,
               hasRatings: full?.ratings ? true : metaProject?.hasRatings || false,
-              reopenRequested: typeof full?.reopenRequested === "boolean"
-                ? full.reopenRequested
-                : metaReopenRequested,
+              reopenRequested:
+                typeof full?.reopenRequested === "boolean"
+                  ? full.reopenRequested
+                  : metaReopenRequested,
             };
           } catch {
             metaProject = {
@@ -361,6 +370,8 @@ export default function Room() {
         // wire socket listeners (scoped)
         const onMessage = (msg) => {
           const shaped = normalizeIncoming(msg, userId);
+          if (!shaped) return; // drop client-only system bubbles
+
           const rid = String(shaped.room || activeRoomId);
 
           // update room preview
@@ -395,7 +406,6 @@ export default function Room() {
           const el = scrollerRef.current;
           if (!el) return;
 
-          // only autoscroll if at bottom or it's our message
           if (atBottomRef.current || shaped.isMine) {
             requestAnimationFrame(() => {
               scrollerRef.current?.scrollTo({
@@ -417,6 +427,7 @@ export default function Room() {
           });
         };
 
+        // client rated → surface close button
         const onRated = ({ ratings }) =>
           setProject((p) => (p ? { ...p, ratings: ratings || p.ratings, hasRatings: true } : p));
 
@@ -427,11 +438,9 @@ export default function Room() {
         const onRoomReopened = ({ roomId }) => {
           if (String(roomId) !== String(activeRoomId)) return;
           setRoomClosed(false);
-          // when reopened, clear the reopenRequested flag locally
           setProject((p) => (p ? { ...p, reopenRequested: false, status: "In-Progress" } : p));
         };
 
-        // ✅ when client requests reopen, PM should see banner/button appear
         const onReopenRequested = ({ roomId }) => {
           if (String(roomId) !== String(activeRoomId)) return;
           setProject((p) => (p ? { ...p, reopenRequested: true } : p));
@@ -480,39 +489,25 @@ export default function Room() {
     return others.length === 1 ? `${first} is typing…` : `${first} and ${others.length - 1} other(s) are typing…`;
   }, [typingByRoom, activeRoomId, roomClosed]);
 
-  /* -------------------------------- commands -------------------------------- */
   const commands = useMemo(() => {
     if (userRole !== "PM") return [];
     return [
       { id: "invoice", title: "Generate an invoice", subtitle: "Create a Stripe hosted invoice for this project", hint: "invoice" },
-      // { id: "zoom", title: "Create a Zoom meeting link", subtitle: "Instant 30-min meeting", hint: "zoom meeting" },
     ];
   }, [userRole]);
 
   const handleRunCommand = async (cmd) => {
     try {
       if (!activeRoomId) return;
-
       if (cmd.id === "invoice") {
         setShowInvoiceModal(true);
         return;
       }
-
-  //     if (cmd.id === "zoom") {
-  //       const topic = `Project sync — ${
-  //         project?.projectTitle || rooms.find((r) => r.id === activeRoomId)?.title || "Chat"
-  //       }`;
-  //       const { data } = await zoom.createMeeting({ topic, duration: 30 });
-  //       const join = data?.joinUrl;
-  //       if (!join) throw new Error("No Zoom join URL returned.");
-  //       await chatApi.send({ roomId: activeRoomId, text: `📹 Zoom meeting: ${join}` });
-  //     }
     } catch (e) {
       setErr(e?.response?.data?.message || e?.message || "Failed to run command");
     }
   };
 
-  /* --------------------------------- actions -------------------------------- */
   const handleScroll = () => {
     const el = scrollerRef.current;
     if (!el) return;
@@ -575,7 +570,6 @@ export default function Room() {
       const pid = getProjectId();
       if (!pid) return;
       await projects.reopen({ requestId: pid });
-      // backend will emit room:reopened; proactively clear local flag too
       setProject((p) => (p ? { ...p, reopenRequested: false, status: "In-Progress" } : p));
       setRoomClosed(false);
     } catch (e) {
@@ -611,22 +605,18 @@ export default function Room() {
           </Link>
           <div className="text-sm text-muted-foreground px-2 truncate">Team Chat</div>
 
-          {/* Mobile open conversation list */}
           <button
             className="sm:hidden text-sm px-2 py-1 rounded-lg border border-border hover:bg-muted"
-            onClick={() => setShowListMobile(true)}
+            onClick={() => {}}
           >
             Chats
           </button>
         </div>
       </div>
 
-      {/* Spacer for fixed bar */}
       <div className="h-12 md:h-14" />
 
-      {/* -------------- Two-column app area (independent scroll) -------------- */}
       <div className="h-[calc(100vh-48px)] md:h-[calc(100vh-56px)] flex bg-background text-foreground overflow-hidden">
-        {/* Sidebar: its own scroll container */}
         <aside className="hidden sm:flex w-72 max-w-[22rem] flex-col border-r border-border overflow-y-auto">
           <ConversationList
             conversations={rooms.map(toConversation(typingByRoom))}
@@ -637,11 +627,9 @@ export default function Room() {
           />
         </aside>
 
-        {/* Chat column: header sticky, messages scroll, composer sticky */}
         <section className={`flex-1 min-w-0 flex flex-col overflow-hidden ${!activeRoomId && "hidden sm:flex"}`}>
           {activeRoomId ? (
             <>
-              {/* Header sticky */}
               <div className="sticky top-0 z-30 bg-background border-b border-border">
                 <ChatHeader
                   contact={{
@@ -705,7 +693,6 @@ export default function Room() {
                 </div>
               )}
 
-              {/* Messages — ONLY scroller in the chat column */}
               <div
                 ref={scrollerRef}
                 onScroll={handleScroll}
@@ -720,7 +707,6 @@ export default function Room() {
                 )}
               </div>
 
-              {/* Composer pinned (does not scroll out) */}
               <div className="sticky bottom-0 border-t border-border bg-background">
                 <div className="max-w-6xl mx-auto px-3 md:px-4 py-2">
                   <ChatInput
@@ -728,31 +714,20 @@ export default function Room() {
                     onTypingChange={handleTypingChange}
                     typingText=""
                     disabled={roomClosed}
-                    commands={commands}
+                    commands={userRole === "PM" ? [{ id: "invoice", title: "Generate an invoice", subtitle: "Create a Stripe hosted invoice for this project", hint: "invoice" }] : []}
                     onCommandRun={handleRunCommand}
                     role={userRole}
                   />
-                  {/* Typing hint just under composer */}
-                  <div className="mt-1 h-6">
-                    {typingText && !roomClosed && (
-                      <div className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-xs text-muted-foreground">
-                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-foreground/60" />
-                        {typingText}
-                      </div>
-                    )}
-                  </div>
                 </div>
               </div>
 
-              {/* Invoice Modal */}
               {showInvoiceModal && userRole === "PM" && (
                 <InvoiceModal
-                  // className="text-sm" // work on the pay color button later
                   projectTitle={project?.projectTitle}
                   onCancel={() => setShowInvoiceModal(false)}
                   onSubmit={async ({ amountDecimal, currency, memo }) => {
                     try {
-                      const pid = project?.['_id'] || project?.id;
+                      const pid = project?.["_id"] || project?.id;
                       if (!pid) throw new Error("No project found for this room.");
 
                       const payload = {
@@ -766,10 +741,7 @@ export default function Room() {
                       const url = data?.hostedUrl || data?.invoiceUrl;
                       if (!url) throw new Error("No invoice URL returned.");
 
-                      const msg =
-                        `🧾 Invoice created — Click here to ${url}.\n`;
-
-                      // send markdown link (the bubble will render it as a clickable text)
+                      const msg = `🧾 Invoice created — ${url}`;
                       await chatApi.send({ roomId: activeRoomId, text: msg });
                       setShowInvoiceModal(false);
                     } catch (e) {

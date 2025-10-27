@@ -1,4 +1,3 @@
-// src/components/layout/Sidebar.jsx
 import { useState, useMemo, useCallback } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,6 +11,7 @@ import { ROLES } from '@/constants/roles';
 import { toast } from 'sonner';
 import useIsMobile from '@/hooks/useIsMobile';
 import ConfirmSignOutModal from '@/components/auth/ConfirmSignOutModal';
+import { connectSocket } from '@/lib/socket';
 
 export default function Sidebar({ isOpen, setIsOpen }) {
   const [hoveredItem, setHoveredItem] = useState(null);
@@ -24,6 +24,7 @@ export default function Sidebar({ isOpen, setIsOpen }) {
   const isMobile = useIsMobile(); // < lg
 
   const user = useSelector((s) => s.auth.user);
+  const userId = user?._id || user?.id;
   const role = (user?.role || '').toLowerCase();
 
   const itemsByRole = useMemo(() => {
@@ -79,6 +80,10 @@ export default function Sidebar({ isOpen, setIsOpen }) {
   const handleSignOutConfirm = async () => {
     setSigningOut(true);
     try {
+      const s = connectSocket(userId);
+      s?.emit('auth:logout');         // immediate presence update
+      await new Promise((r) => setTimeout(r, 150));
+
       await dispatch(logoutThunk());
       navigate('/signin', { replace: true });
     } finally {

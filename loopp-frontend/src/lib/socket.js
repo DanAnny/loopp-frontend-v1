@@ -3,6 +3,8 @@ import { io } from "socket.io-client";
 import { SOCKET_URL } from "@/services/http";
 
 let socket = null;
+let heartbeatTimer = null;
+let idleTimer = null;
 
 /** Return current socket instance (may be null). */
 export function getSocket() {
@@ -14,6 +16,89 @@ export function isSocketConnected() {
   return !!(socket && socket.connected);
 }
 
+/** Internal: start presence heartbeats (every 5s). */
+function startHeartbeat() {
+  stopHeartbeat();
+  if (!socket) return;
+  heartbeatTimer = setInterval(() => {
+    try {
+      socket.emit("presence:active");
+    } catch {}
+  }, 5000);
+  try {
+    socket.emit("presence:active"); // fast mark online
+  } catch {}
+}
+
+/** Internal: stop presence heartbeats. */
+function stopHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+/** Idle detection: if no activity for 10s → stop heartbeats */
+function setupIdleDetection() {
+  const reportActivity = () => {
+    try {
+      socket?.emit("presence:active");
+    } catch {}
+    startHeartbeat(); // ensure heartbeats continue
+    resetIdleTimer();
+  };
+
+  const resetIdleTimer = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      stopHeartbeat(); // → backend marks offline
+    }, 10000); // 10 seconds
+  };
+
+  ["mousemove", "keydown", "click", "scroll", "touchstart"].forEach(evt => {
+    document.addEventListener(evt, reportActivity);
+  });
+
+  resetIdleTimer();
+}
+
+/** Clear tokens + user data and redirect properly */
+export function handleLogout(force = false) {
+  let redirect = "/signin"; // default for staff
+  try {
+    const raw = localStorage.getItem("user");
+    if (raw) {
+      const storedUser = JSON.parse(raw);
+      if (storedUser?.role === "Client") {
+        redirect = "/client-sign-in";
+      }
+    }
+  } catch {}
+
+  try {
+    localStorage.removeItem("accessToken");
+    localStorage.removeItem("refreshToken");
+    localStorage.removeItem("user");
+  } catch {}
+
+  stopHeartbeat();
+  try {
+    if (socket && socket.io && socket.io.opts) {
+      socket.io.opts.reconnection = false;
+    }
+  } catch {}
+  try {
+    socket?.disconnect?.();
+  } catch {}
+  socket = null;
+
+  if (force) {
+    window.location.replace(redirect);
+  } else {
+    window.location.href = redirect;
+  }
+}
+
 /** Connect once per app session. Safe to call multiple times. */
 export function connectSocket(userId = null, options = {}) {
   if (socket && (socket.connected || socket.connecting)) return socket;
@@ -23,16 +108,39 @@ export function connectSocket(userId = null, options = {}) {
     withCredentials: true,
     autoConnect: true,
     reconnection: true,
-    // carry a lightweight auth payload if provided
     auth: userId ? { userId: String(userId) } : undefined,
     ...options,
   });
 
-  // defensive: drop noisy default listeners if re-created
   socket.removeAllListeners?.("connect_error");
-  socket.on?.("connect_error", () => {
-    // no-op: caller can read connection state via isSocketConnected()
+  socket.on?.("connect_error", () => {});
+
+  socket.on?.("connect", () => {
+    startHeartbeat();
+    setupIdleDetection();
   });
+
+  socket.on?.("disconnect", () => {
+    stopHeartbeat();
+  });
+
+  // Server instructs to force logout (idle timeout, token bump, etc.)
+  socket.on?.("auth:force_logout", () => {
+    handleLogout(true);
+  });
+
+  // Keep presence tight when tab is foregrounded
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (!socket) return;
+      if (document.visibilityState === "visible") {
+        try {
+          socket.emit("presence:active");
+        } catch {}
+        startHeartbeat();
+      }
+    });
+  }
 
   return socket;
 }
@@ -42,25 +150,21 @@ export function disconnectSocket() {
   try {
     if (socket) {
       socket.removeAllListeners?.();
-      // guard: prevent auto-reconnect loop during logout/reset
       try { socket.io.opts.reconnection = false; } catch {}
       socket.disconnect?.();
     }
   } catch {}
+  stopHeartbeat();
   socket = null;
 }
 
-/**
- * Join a room with a timeout guard; resolves when server emits "joined".
- * `userId` is optional and sent only if provided.
- */
+/** Join a room with a timeout guard */
 export function joinRoom(roomId, userId = null, timeoutMs = 4000) {
   return new Promise((resolve, reject) => {
     const s = getSocket();
     if (!s) return reject(new Error("Socket not connected"));
     if (!roomId) return reject(new Error("Missing roomId"));
 
-    // if already joined, many servers still emit "joined"—we'll just resolve on the first one
     const onJoined = (payload) => {
       const rid = (payload && (payload.roomId || payload))?.toString?.() || "";
       if (rid === roomId.toString()) {
@@ -88,7 +192,6 @@ export function joinRoom(roomId, userId = null, timeoutMs = 4000) {
     s.on("join_error", onError);
     s.on("error", onError);
 
-    // keep payload shape compatible with your server
     const payload = { roomId: String(roomId) };
     if (userId) payload.userId = String(userId);
 
@@ -102,4 +205,5 @@ export default {
   isSocketConnected,
   disconnectSocket,
   joinRoom,
+  handleLogout,
 };

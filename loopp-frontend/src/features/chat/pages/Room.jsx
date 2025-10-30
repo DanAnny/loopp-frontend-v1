@@ -13,6 +13,12 @@ import ChatHeader from "../components/ChatHeader";
 import ChatInput from "../components/ChatInput";
 import MessageBubble from "../components/MessageBubble";
 
+import SearchBar from "@/features/chat/components/SearchBar";
+import InlineNotification from "@/features/chat/components/InlineNotification";
+import ChatBackground from "@/features/chat/components/ChatBackground";
+import UnreadMessagesIndicator from "@/features/chat/components/UnreadMessagesIndicator";
+import InvoiceModal from "../components/InvoiceModal";
+
 /* ------------------------------ unread helpers ------------------------------ */
 const UNREAD_KEY = (userId) => `CHAT_UNREAD:${userId}`;
 function getUnreadMap(userId) {
@@ -36,7 +42,8 @@ function unreadCountFor(userId, roomId) {
 function incUnread(userId, roomId) {
   const m = getUnreadMap(userId);
   const cur = m[roomId]?.count || 0;
-  m[roomId] = { count: cur + 0, lastReadAt: m[roomId]?.lastReadAt || null };
+  // increment properly
+  m[roomId] = { count: cur + 1, lastReadAt: m[roomId]?.lastReadAt || null };
   setUnreadMap(userId, m);
 }
 function clearUnread(userId, roomId) {
@@ -51,16 +58,18 @@ const shortName = (s, m = 28) => {
   return t.length <= m ? t : t.slice(0, m - 1) + "…";
 };
 const norm = (r = "") => (r || "").toString();
+
 function normalizeRole(r = "") {
-  const s = norm(r);
-  if (/system/i.test(s)) return "System";
-  if (/super\s*admin/i.test(s)) return "SuperAdmin";
-  if (/admin/i.test(s) && !/super/i.test(s)) return "Admin";
-  if (/pm|project\s*manager/i.test(s)) return "PM";
-  if (/engineer/i.test(s)) return "Engineer";
-  if (/client/i.test(s)) return "Client";
+  const s = String(r || "").trim();
+  if (/^system$/i.test(s)) return "System";
+  if (/^super\s*admin$/i.test(s)) return "SuperAdmin";
+  if (/^admin$/i.test(s)) return "Admin";
+  if (/^pm$|project\s*manager/i.test(s)) return "PM";
+  if (/^engineer$/i.test(s)) return "Engineer";
+  if (/^client$/i.test(s)) return "Client";
   return "User";
 }
+
 function roleToTheme(role, isMine) {
   if (role === "System") return "system";
   if (isMine) return "me";
@@ -75,41 +84,110 @@ function previewText(m) {
   if (m.attachments?.length && !m.content) return `📎 ${m.attachments.length} attachment(s)`;
   return m.content || "—";
 }
-function normalizeIncoming(m, meId) {
-  // Drop client-only system messages for staff
-  if (String(m.senderType || "").toLowerCase() === "system" && String(m.visibleTo || "All") === "Client") {
+
+function normalizeIncoming(m, meId, dir = {}) {
+  // Hide staff-only system messages from clients
+  if (
+    String(m.senderType || "").toLowerCase() === "system" &&
+    String(m.visibleTo || "All") === "Client"
+  ) {
     return null;
   }
 
-  const senderId =
-    typeof m.sender === "string" ? m.sender : m.sender?._id || m.sender?.id || "";
-  const isMine = senderId && String(senderId) === String(meId);
+  // Raw sender may be missing for Client messages
+  const rawSender = m.sender || m.user || {};
+  const senderId = (
+    typeof rawSender === "string"
+      ? rawSender
+      : rawSender._id || rawSender.id || ""
+  ).toString();
+
+  // Directory lookup if we only have an id
+  const lookup = (senderId && dir[senderId]) ? dir[senderId] : {};
+
+  // NEW: pull name/email from message for Clients
+  const clientName  = (m.clientName || "").toString().trim();
+  const clientEmail = (m.clientEmail || "").toString().trim();
+
+  const first = (rawSender.firstName ?? lookup.firstName ?? "").toString().trim();
+  const last  = (rawSender.lastName  ?? lookup.lastName  ?? "").toString().trim();
+
+  // include clientEmail as a fallback here
+  const email = (
+    rawSender.email ??
+    lookup.email ??
+    clientEmail ??
+    ""
+  ).toString().trim();
+
+  const full  = [first, last].filter(Boolean).join(" ");
+  const explicitName = (m.senderName || "").toString().trim();
+  const username = (rawSender.username || "").toString().trim();
+
+  // Role normalization (respect senderType for clients)
   const rawRole =
-    m.senderRole || m.role || (m.senderType === "Client" ? "Client" : m.sender?.role || "User");
+    rawSender.role ||
+    m.senderRole ||
+    m.role ||
+    lookup.role ||
+    m.senderType ||
+    "User";
   const role = normalizeRole(rawRole);
 
-  const senderName =
-    m.senderName ||
-    (m.sender?.firstName || m.sender?.lastName
-      ? [m.sender.firstName, m.sender.lastName].filter(Boolean).join(" ")
-      : role);
+  // Build a nicer display name:
+  // 1) explicitName (unless it's literally "Client")
+  // 2) full name (staff)
+  // 3) clientName (from message)
+  // 4) email local-part (incl. clientEmail)
+  // 5) username
+  // 6) role as absolute last resort
+  const emailLocal = email ? email.split("@")[0] : "";
+  let senderName =
+    (explicitName && explicitName.toLowerCase() !== "client" ? explicitName : "") ||
+    full ||
+    clientName ||
+    emailLocal ||
+    username ||
+    (emailLocal ? emailLocal : "") ||
+    role;
+
+  const isMine = senderId && senderId === String(meId);
 
   const created = m.createdAt || m.createdAtISO || m.timestamp || new Date().toISOString();
+  const attachments = Array.isArray(m.attachments) ? m.attachments : [];
 
   const shaped = {
     _id: m._id || m.id || `${Date.now()}-${Math.random()}`,
-    room: m.room?._id || m.room || "",
+    room: (m.room && (m.room._id || m.room)) || "",
     content: m.text || m.content || "",
     timestamp: new Date(created).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     createdAtISO: new Date(created).toISOString(),
-    isMine,
-    senderRole: role,
+
     senderName,
-    attachments: Array.isArray(m.attachments) ? m.attachments : [],
+    senderRole: role,
+    senderType: (m.senderType || "").toString(),
+    isMine,
+
+    // keep a compact sender stub for staff; client msgs won’t have one
+    sender: {
+      _id: senderId || undefined,
+      firstName: first || undefined,
+      lastName:  last  || undefined,
+      email:     email || undefined,
+      role
+    },
+
+    // NEW: carry through client name/email so the bubble can use them
+    clientName: clientName || undefined,
+    clientEmail: clientEmail || (email && role === "Client" ? email : undefined),
+
+    attachments
   };
+
   shaped.bubbleTheme = roleToTheme(role, isMine);
   return shaped;
 }
+
 function msgSignature(m) {
   return [
     String(m.room || ""),
@@ -144,6 +222,21 @@ async function waitForSocketConnected(s, timeout = 4000) {
   });
 }
 
+/* -------------------------- date-separator formatting -------------------------- */
+const formatDateSeparator = (date) => {
+  const today = new Date();
+  const yest = new Date(today);
+  yest.setDate(yest.getDate() - 1);
+  const sameDay = (a, b) => a.toDateString() === b.toDateString();
+
+  if (sameDay(date, today)) return "Today";
+  if (sameDay(date, yest)) return "Yesterday";
+
+  const diffDays = Math.floor((today - date) / (1000 * 60 * 60 * 24));
+  if (diffDays < 7) return date.toLocaleDateString([], { weekday: "long" });
+  return date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+};
+
 /* ------------------------------- map to list ------------------------------- */
 function mapRoom(r) {
   return {
@@ -163,16 +256,16 @@ const toConversation = (typingByRoom) => (r) => {
     avatar: "",
     lastMessage: r.lastMessage || "",
     time: new Date(r.updatedAtISO).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    unreadCount: 0,
+    unreadCount: r.unreadCount || 0,
     isOnline: !r.isClosed,
     isPinned: false,
     typing,
   };
 };
 
-/* --------------------------------- page --------------------------------- */
 export default function Room() {
   const user = useSelector((s) => s.auth.user);
+  const [memberDir, setMemberDir] = useState({}); // id -> { firstName, lastName, email, role }
   const userId = user?._id || user?.id;
   const userRole = normalizeRole((user?.role || "User").toString());
   const userName =
@@ -195,19 +288,18 @@ export default function Room() {
   // PM actions
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
 
+  // UI-only state
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadFloatCount, setUnreadFloatCount] = useState(0);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [highlightedMessageId, setHighlightedMessageId] = useState(null);
+
   // scroller controls
   const scrollerRef = useRef(null);
   const atBottomRef = useRef(true);
-
-  // prevent page scroll when invoice modal opens
-  useEffect(() => {
-    if (!showInvoiceModal) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [showInvoiceModal]);
+  const messageRefs = useRef({});
 
   /* ----------------------------- typing cleanup ---------------------------- */
   useEffect(() => {
@@ -244,7 +336,6 @@ export default function Room() {
         const { data } = await chatApi.myRooms();
         const list = Array.isArray(data?.rooms) ? data.rooms : [];
 
-        // sort by updated desc
         list.sort(
           (a, b) =>
             new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0)
@@ -291,7 +382,7 @@ export default function Room() {
         const list = Array.isArray(data?.messages) ? data.messages : [];
         const normalized = list
           .map((m) => normalizeIncoming(m, userId))
-          .filter(Boolean); // drop client-only system bubbles here defensively
+          .filter(Boolean);
         setMessages(normalized);
 
         // project meta
@@ -309,14 +400,14 @@ export default function Room() {
           metaProject = null;
         }
 
-        if (userRole === "PM") {
+        if (normalizeRole(userRole) === "PM") {
           try {
             const resFull = await projects.getByRoom(activeRoomId);
             const full = resFull?.data?.project || {};
             metaProject = {
               ...full,
               _id: full?._id || full?.id || metaProject?._id || null,
-              hasRatings: full?.ratings ? true : metaProject?.hasRatings || false,
+              hasRatings: !!full?.ratings || (metaProject?.hasRatings || false),
               reopenRequested:
                 typeof full?.reopenRequested === "boolean"
                   ? full.reopenRequested
@@ -364,13 +455,16 @@ export default function Room() {
           if (el) {
             el.scrollTop = el.scrollHeight;
             atBottomRef.current = true;
+            setIsAtBottom(true);
+            setUnreadFloatCount(0);
           }
         });
 
-        // wire socket listeners (scoped)
+        // socket listeners
         const onMessage = (msg) => {
+          console.debug("RAW_MSG", msg);
           const shaped = normalizeIncoming(msg, userId);
-          if (!shaped) return; // drop client-only system bubbles
+          if (!shaped) return;
 
           const rid = String(shaped.room || activeRoomId);
 
@@ -390,7 +484,7 @@ export default function Room() {
             return updated;
           });
 
-          // handle unread when message is not for active room and not mine
+          // unread for other rooms
           if (rid !== String(activeRoomId) && !shaped.isMine) {
             incUnread(userId, rid);
             setRooms((prev) =>
@@ -406,13 +500,17 @@ export default function Room() {
           const el = scrollerRef.current;
           if (!el) return;
 
-          if (atBottomRef.current || shaped.isMine) {
+          const atBottom = atBottomRef.current;
+          if (atBottom || shaped.isMine) {
             requestAnimationFrame(() => {
               scrollerRef.current?.scrollTo({
                 top: scrollerRef.current.scrollHeight,
                 behavior: "smooth",
               });
             });
+            setUnreadFloatCount(0);
+          } else {
+            setUnreadFloatCount((c) => c + 1);
           }
         };
 
@@ -427,7 +525,6 @@ export default function Room() {
           });
         };
 
-        // client rated → surface close button
         const onRated = ({ ratings }) =>
           setProject((p) => (p ? { ...p, ratings: ratings || p.ratings, hasRatings: true } : p));
 
@@ -460,9 +557,9 @@ export default function Room() {
         s.on("room:reopened", onRoomReopened);
         s.on("reopen:requested", onReopenRequested);
       } catch (e) {
-        if (!cancelled) setErr(e?.message || "Failed to join room");
+        setErr(e?.message || "Failed to join room");
       } finally {
-        if (!cancelled) setJoining(false);
+        setJoining(false);
       }
     })();
 
@@ -481,14 +578,62 @@ export default function Room() {
   const canShowClose = userRole === "PM" && rated && !roomClosed;
   const canShowReopen = userRole === "PM" && roomClosed && !!project?.reopenRequested;
 
+  /* ----------------------------- presence counts ----------------------------- */
+  // Online if last activity < 5 min or currently typing
+  const presence = useMemo(() => {
+    const map = new Map();
+    const now = Date.now();
+
+    for (const m of messages) {
+      if (!m?.senderName) continue;
+      const key = m.senderName + "|" + (m.senderRole || "");
+      const last = new Date(m.createdAtISO || Date.now()).getTime();
+      const prev = map.get(key) || { name: m.senderName, role: m.senderRole, last: 0 };
+      if (last > prev.last) map.set(key, { name: m.senderName, role: m.senderRole, last });
+    }
+
+    // always include me
+    map.set(userName + "|" + userRole, { name: userName, role: userRole, last: now });
+
+    const typers = Object.values(typingByRoom[activeRoomId] || {});
+    const typingRoles = typers.map((t) => t.role);
+
+    let online = 0;
+    let offline = 0;
+    const fiveMin = 5 * 60 * 1000;
+
+    map.forEach((v) => {
+      const isTyping = typingRoles.includes(v.role);
+      const active = isTyping || now - v.last <= fiveMin;
+      if (active) online += 1;
+      else offline += 1;
+    });
+
+    return {
+      total: map.size,
+      online,
+      offline,
+      users: Array.from(map.values()).map((u) => ({
+        id: u.name + "|" + u.role,
+        name: u.name,
+        role: u.role,
+        isOnline: now - u.last <= fiveMin || typingRoles.includes(u.role),
+      })),
+    };
+  }, [messages, typingByRoom, activeRoomId, userName, userRole]);
+
+  /* ------------------------------ typing label ------------------------------ */
   const typingText = useMemo(() => {
     if (!activeRoomId || roomClosed) return "";
     const others = Object.values(typingByRoom[activeRoomId] || {});
     if (!others.length) return "";
     const first = normalizeRole(others[0].role);
-    return others.length === 1 ? `${first} is typing…` : `${first} and ${others.length - 1} other(s) are typing…`;
+    return others.length === 1
+      ? `${first} is typing`
+      : `${first} and ${others.length - 1} other(s) are typing`;
   }, [typingByRoom, activeRoomId, roomClosed]);
 
+  /* -------------------------------- commands -------------------------------- */
   const commands = useMemo(() => {
     if (userRole !== "PM") return [];
     return [
@@ -513,12 +658,16 @@ export default function Room() {
     if (!el) return;
     const threshold = 120;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    atBottomRef.current = distanceFromBottom < threshold;
+    const atBottom = distanceFromBottom < threshold;
+    atBottomRef.current = atBottom;
+    setIsAtBottom(atBottom);
+    if (atBottom) setUnreadFloatCount(0);
   };
 
   const handleSendMessage = async (text, files = []) => {
     if (!activeRoomId || roomClosed) return;
 
+    // file-attachment logic preserved
     let fileArray = [];
     if (files) {
       if (typeof FileList !== "undefined" && files instanceof FileList) {
@@ -577,74 +726,124 @@ export default function Room() {
     }
   };
 
-  const BackIcon = () => (
-    <svg className="w-5 h-5 md:w-6 md:h-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M10 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4 12h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
+  /* ---------------------------- derived: grouping ---------------------------- */
+  const grouped = useMemo(() => {
+    if (!messages?.length) return [];
+    const map = {};
+    for (const m of messages) {
+      const d = new Date(m.createdAtISO || Date.now());
+      const key = d.toDateString();
+      if (!map[key]) map[key] = [];
+      map[key].push(m);
+    }
+    return Object.keys(map)
+      .sort((a, b) => new Date(a) - new Date(b))
+      .map((k) => ({ date: new Date(k), list: map[k] }));
+  }, [messages]);
 
   /* ---------------------------------- UI ---------------------------------- */
   if (loading) return <div className="h-screen grid place-items-center">Loading chat…</div>;
   if (err) return <div className="h-screen grid place-items-center text-red-600 px-4 text-center break-words">{err}</div>;
 
-  return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground">
-      {/* Global top bar fixed */}
-      <div className="fixed top-0 left-0 right-0 z-40 w-full bg-background/95 border-b border-border backdrop-blur supports-[backdrop-filter]:bg-background/70">
-        <div className="max-w-6xl mx-auto px-3 md:px-4 h-12 md:h-14 flex items-center justify-between">
-          <Link
-            to="/"
-            className="bg-black backlink inline-flex items-center gap-2 px-2 py-1 rounded-full text-sm font-medium hover:bg-muted focus-visible:bg-muted transition"
-            title="Back"
-          >
-            <span className="ico text-white/80">
-              <BackIcon />
-            </span>
-            <span className="hidden sm:inline text-white">Back to Dashboard</span>
-          </Link>
-          <div className="text-sm text-muted-foreground px-2 truncate">Team Chat</div>
+  const conversations = rooms.map(toConversation(typingByRoom));
+  const headerContact = {
+    name: shortName(rooms.find((r) => r.id === activeRoomId)?.title || "Team Chat"),
+    status: roomClosed ? "Closed" : typingText || (joining ? "Joining…" : "Online"),
+    avatar: "",
+    isOnline: !joining && !roomClosed,
+  };
 
-          <button
-            className="sm:hidden text-sm px-2 py-1 rounded-lg border border-border hover:bg-muted"
-            onClick={() => {}}
-          >
-            Chats
-          </button>
-        </div>
+  return (
+    <div className="h-screen flex flex-col overflow-hidden bg-white">
+      {/* Top Navigation Bar */}
+      <div className="border-b px-4 py-3 flex items-center justify-between z-50 bg-white border-gray-200">
+        <Link
+          to="/"
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full transition bg-black text-white hover:bg-black/90"
+          title="Back"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="hidden sm:inline text-sm font-medium">Dashboard</span>
+        </Link>
+
+        <div className="text-sm font-medium text-gray-600">Team Chat</div>
+
+        <button
+          className="sm:hidden px-3 py-1.5 rounded-lg border text-sm transition border-gray-200 hover:bg-gray-50"
+          onClick={() => setShowSidebar(true)}
+        >
+          Rooms
+        </button>
       </div>
 
-      <div className="h-12 md:h-14" />
-
-      <div className="h-[calc(100vh-48px)] md:h-[calc(100vh-56px)] flex bg-background text-foreground overflow-hidden">
-        <aside className="hidden sm:flex w-72 max-w-[22rem] flex-col border-r border-border overflow-y-auto">
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        {/* Sidebar */}
+        <aside
+          className={`${
+            showSidebar ? "translate-x-0" : "-translate-x-full"
+          } sm:translate-x-0 fixed sm:relative inset-y-0 left-0 z-40 w-80 border-r transition-transform duration-300 sm:flex flex-col bg-white border-gray-200`}
+        >
+          {showSidebar && (
+            <div
+              className="sm:hidden fixed inset-0 bg-black/20 -z-10"
+              onClick={() => setShowSidebar(false)}
+            />
+          )}
           <ConversationList
-            conversations={rooms.map(toConversation(typingByRoom))}
+            conversations={conversations}
             activeConversationId={activeRoomId}
-            onConversationSelect={(id) => setActiveRoomId(id)}
+            onConversationSelect={(id) => {
+              setActiveRoomId(id);
+              setShowSidebar(false);
+            }}
             loading={false}
             error={""}
           />
         </aside>
 
-        <section className={`flex-1 min-w-0 flex flex-col overflow-hidden ${!activeRoomId && "hidden sm:flex"}`}>
+        {/* Chat Area */}
+        <section className={`relative flex-1 min-w-0 flex flex-col overflow-hidden min-h-0 ${!activeRoomId && "hidden sm:flex"} bg-gray-50`}>
+          {/* Pinned wallpaper (NON-SCROLLING) */}
+          <ChatBackground variant="staff" />
+
           {activeRoomId ? (
             <>
-              <div className="sticky top-0 z-30 bg-background border-b border-border">
+              {/* Chat Header */}
+              <div className="sticky top-0 z-30 bg-white border-b border-gray-200">
                 <ChatHeader
-                  contact={{
-                    name: shortName(rooms.find((r) => r.id === activeRoomId)?.title || "Chat"),
-                    avatar: "",
-                    status: roomClosed ? "Closed" : typingText || (joining ? "Joining…" : "Online"),
-                    isOnline: !joining && !roomClosed,
-                  }}
-                  onBack={() => {}}
+                  contact={headerContact}
+                  onBack={() => setShowSidebar(true)}
+                  onSearchToggle={() => setShowSearch((v) => !v)}
+                  activeUsers={presence.users}
+                  totalUsers={presence.total}
                 />
               </div>
 
-              {/* Inline banner for close/reopen (sticky under chat header) */}
+              {/* Search Bar */}
+              {showSearch && (
+                <div className="border-b bg-white z-20">
+                  <SearchBar
+                    messages={messages}
+                    onClose={() => setShowSearch(false)}
+                    onResultSelect={(index) => {
+                      const msg = messages[index];
+                      if (!msg) return;
+                      const el = messageRefs.current[msg._id];
+                      if (el) {
+                        setHighlightedMessageId(msg._id);
+                        el.scrollIntoView({ behavior: "smooth", block: "center" });
+                        setTimeout(() => setHighlightedMessageId(null), 1800);
+                      }
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Close/Reopen banner */}
               {(canShowClose || canShowReopen) && (
-                <div className="sticky top-[48px] md:top-[56px] z-20 border-b border-border bg-background/95 px-3 md:px-4 py-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="sticky top-[48px] md:top-[56px] z-20 border-b border-gray-200 bg-white px-3 md:px-4 py-2 flex flex-wrap items-center justify-between gap-2">
                   {canShowClose && (
                     <>
                       <div className="flex flex-1 min-w-0 flex-wrap items-center gap-2">
@@ -658,7 +857,7 @@ export default function Room() {
                           </span>
                         </span>
                         {project?.ratings?.pm?.comment && (
-                          <span className="text-xs text-muted-foreground truncate max-w-[46ch]">
+                          <span className="text-xs text-gray-600 truncate max-w-[46ch]">
                             “{project.ratings.pm.comment}”
                           </span>
                         )}
@@ -667,9 +866,7 @@ export default function Room() {
                       <button
                         onClick={handleCloseRoom}
                         className="shrink-0 rounded-full px-4 py-2 text-sm font-semibold text-white shadow-sm
-                                   bg-gradient-to-r from-indigo-600 to-violet-600
-                                   hover:from-indigo-500 hover:to-violet-500
-                                   active:scale-[.98] transition"
+                                   bg-black hover:bg-black/90 active:scale-[.98] transition"
                         title="Close this room and mark the project Complete"
                       >
                         Close Room
@@ -679,7 +876,7 @@ export default function Room() {
 
                   {canShowReopen && (
                     <div className="w-full sm:w-auto flex items-center justify-between gap-2">
-                      <div className="text-sm text-muted-foreground">
+                      <div className="text-sm text-gray-600">
                         Client requested to reopen this room.
                       </div>
                       <button
@@ -693,21 +890,63 @@ export default function Room() {
                 </div>
               )}
 
+              {/* Messages Area */}
               <div
                 ref={scrollerRef}
                 onScroll={handleScroll}
-                className="flex-1 overflow-y-auto p-3 md:p-4 lg:p-6 bg-background"
+                className="relative z-10 flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-3 min-h-0
+                           scroll-smooth"
               >
                 {messages.length ? (
-                  messages.map((m) => <MessageBubble key={m._id} message={m} />)
+                  grouped.map((g) => (
+                    <div key={g.date.toISOString()} className="space-y-2.5">
+                      {/* Date separator */}
+                      <div className="flex items-center justify-center my-4">
+                        <div className="border rounded-full px-3 py-1 shadow-sm bg-gray-100 border-gray-200 text-gray-700">
+                          <span className="text-[11px] font-medium">
+                            {formatDateSeparator(g.date)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Message list */}
+                      <div className="space-y-2">
+                        {g.list.map((m) => (
+                          <div key={m._id} ref={(el) => (messageRefs.current[m._id] = el)}>
+                            <MessageBubble
+                              message={m}
+                              highlighted={highlightedMessageId === m._id}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))
                 ) : (
-                  <div className="h-full w-full grid place-items-center text-center text-muted-foreground px-4">
+                  <div className="h-full w-full grid place-items-center text-center text-gray-500 px-4">
                     No messages yet
                   </div>
                 )}
+                {/* Bottom spacer so timestamps & input never clash */}
+                <div className="h-8" />
               </div>
 
-              <div className="sticky bottom-0 border-t border-border bg-background">
+              {/* Typing Indicator */}
+              {typingText && headerContact.status !== "Closed" && (
+                <div className="px-4 pb-2 relative z-20">
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs bg-white/90 backdrop-blur border-gray-200 text-gray-600">
+                    <span className="flex gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full animate-bounce bg-gray-400" style={{ animationDelay: "0ms" }} />
+                      <span className="w-1.5 h-1.5 rounded-full animate-bounce bg-gray-400" style={{ animationDelay: "150ms" }} />
+                      <span className="w-1.5 h-1.5 rounded-full animate-bounce bg-gray-400" style={{ animationDelay: "300ms" }} />
+                    </span>
+                    {typingText}
+                  </div>
+                </div>
+              )}
+
+              {/* Input */}
+              <div className="sticky bottom-0 border-t bg-white/95 backdrop-blur border-gray-200 z-20">
                 <div className="max-w-6xl mx-auto px-3 md:px-4 py-2">
                   <ChatInput
                     onSendMessage={handleSendMessage}
@@ -721,143 +960,86 @@ export default function Room() {
                 </div>
               </div>
 
-              {showInvoiceModal && userRole === "PM" && (
-                <InvoiceModal
-                  projectTitle={project?.projectTitle}
-                  onCancel={() => setShowInvoiceModal(false)}
-                  onSubmit={async ({ amountDecimal, currency, memo }) => {
-                    try {
-                      const pid = project?.["_id"] || project?.id;
-                      if (!pid) throw new Error("No project found for this room.");
-
-                      const payload = {
-                        projectId: pid,
-                        amountDecimal,
-                        currency: currency || "USD",
-                        memo: memo || `Invoice for ${project?.projectTitle || "project"}`,
-                      };
-
-                      const { data } = await invoices.createInvoice(payload);
-                      const url = data?.hostedUrl || data?.invoiceUrl;
-                      if (!url) throw new Error("No invoice URL returned.");
-
-                      const msg = `🧾 Invoice created — ${url}`;
-                      await chatApi.send({ roomId: activeRoomId, text: msg });
-                      setShowInvoiceModal(false);
-                    } catch (e) {
-                      setErr(e?.response?.data?.message || e?.message || "Failed to create invoice");
-                    }
+              {/* Unread floater */}
+              {unreadFloatCount > 0 && !isAtBottom && (
+                <UnreadMessagesIndicator
+                  count={unreadFloatCount}
+                  onClick={() => {
+                    const el = scrollerRef.current;
+                    if (!el) return;
+                    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+                    setUnreadFloatCount(0);
                   }}
                 />
               )}
+
+              {/* Inline error */}
+              {err && (
+                <div className="px-4 py-2">
+                  <InlineNotification
+                    notification={{
+                      id: "err",
+                      type: "error",
+                      message: err,
+                      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                    }}
+                    onDismiss={() => setErr("")}
+                  />
+                </div>
+              )}
             </>
           ) : (
-            <div className="hidden sm:grid flex-1 place-items-center text-muted-foreground p-6">
+            <div className="hidden sm:grid flex-1 place-items-center text-gray-500 p-6 z-10">
               {loading ? "Loading your rooms…" : "Select a conversation to start chatting"}
             </div>
           )}
         </section>
       </div>
-    </div>
-  );
-}
 
-/* ------------------------------- Invoice Modal ------------------------------- */
-function InvoiceModal({ projectTitle, onCancel, onSubmit }) {
-  const [amountDecimal, setAmountDecimal] = useState("199.00");
-  const [currency, setCurrency] = useState("USD");
-  const [memo, setMemo] = useState(projectTitle ? `Invoice for ${projectTitle}` : "Invoice");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
+      {/* Invoice Modal */}
+      {showInvoiceModal && userRole === "PM" && (
+        <InvoiceModal
+          projectTitle={project?.projectTitle}
+          onCancel={() => setShowInvoiceModal(false)}
+          onSubmit={async ({ amountDecimal, currency, memo }) => {
+            try {
+              const pid = project?.["_id"] || project?.id;
+              if (!pid) throw new Error("No project found for this room.");
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setErr("");
-    if (!amountDecimal || isNaN(Number(amountDecimal)) || Number(amountDecimal) <= 0) {
-      setErr("Enter a valid amount (e.g., 199.00).");
-      return;
-    }
-    if (!currency || currency.length < 3) {
-      setErr("Enter a valid 3-letter currency (e.g., USD).");
-      return;
-    }
-    try {
-      setBusy(true);
-      await onSubmit({
-        amountDecimal: String(amountDecimal),
-        currency: currency.toUpperCase(),
-        memo: (memo || "").trim(),
-      });
-    } catch (e) {
-      setErr(e?.message || "Failed to create invoice");
-    } finally {
-      setBusy(false);
-    }
-  };
+              const payload = {
+                projectId: pid,
+                amountDecimal,
+                currency: currency || "USD",
+                memo: memo || `Invoice for ${project?.projectTitle || "project"}`,
+              };
 
-  return (
-    <div className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm grid place-items-center p-3">
-      <form
-        onSubmit={handleSubmit}
-        className="w-full max-w-md rounded-2xl bg-background border border-border shadow-xl p-4 max-h-[90vh] overflow-auto"
-      >
-        <div className="mb-3">
-          <h2 className="text-lg font-semibold">Generate Invoice</h2>
-          <p className="text-xs text-muted-foreground">Stripe hosted payment page</p>
-        </div>
+              // create the invoice
+              const { data } = await invoices.createInvoice(payload);
+              const url = data?.hostedUrl || data?.invoiceUrl;
+              if (!url) throw new Error("No invoice URL returned.");
 
-        <div className="grid grid-cols-1 gap-3">
-          <label className="grid gap-1">
-            <span className="text-sm font-medium">Amount</span>
-            <input
-              type="number"
-              inputMode="decimal"
-              step="0.01"
-              min="0"
-              value={amountDecimal}
-              onChange={(e) => setAmountDecimal(e.target.value)}
-              className="w-full rounded-xl border border-border bg-input-background px-3 py-2 outline-none focus:border-foreground/30"
-              placeholder="199.00"
-            />
-          </label>
+              // drop a message into the chat with the hosted URL
+              const msg = `🧾 Invoice created — ${url}`;
+              await chatApi.send({ roomId: activeRoomId, text: msg });
 
-          <label className="grid gap-1">
-            <span className="text-sm font-medium">Currency</span>
-            <input
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value.toUpperCase())}
-              className="w-full rounded-xl border border-border bg-input-background px-3 py-2 outline-none focus:border-foreground/30"
-              placeholder="USD"
-              maxLength={3}
-            />
-          </label>
+              // close modal + toast-like inline notification
+              setShowInvoiceModal(false);
+              setNotifications((p) => [
+                ...p,
+                {
+                  id: `n-${Date.now()}`,
+                  type: "success",
+                  message: "Invoice created successfully",
+                  timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                },
+              ]);
+            } catch (e) {
+              setErr(e?.response?.data?.message || e?.message || "Failed to create invoice");
+            }
+          }}
+        />
+      )}
 
-          <label className="grid gap-1">
-            <span className="text-sm font-medium">Memo (optional)</span>
-            <input
-              value={memo}
-              onChange={(e) => setMemo(e.target.value)}
-              className="w-full rounded-xl border border-border bg-input-background px-3 py-2 outline-none focus:border-foreground/30"
-              placeholder="What is this invoice for?"
-            />
-          </label>
-        </div>
-
-        {err && <div className="mt-3 text-sm text-red-600 break-words">{err}</div>}
-
-        <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border border-border hover:bg-muted">
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={busy}
-            className="px-4 py-2 rounded-xl text-white bg-black hover:bg-black/90 disabled:opacity-50"
-          >
-            {busy ? "Creating…" : "Create Invoice"}
-          </button>
-        </div>
-      </form>
     </div>
   );
 }

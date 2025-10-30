@@ -1,4 +1,3 @@
-// backend/src/controllers/project.controller.js
 import * as projectService from "../services/project.service.js";
 import { fromReq } from "../services/audit.service.js";
 import { getIO } from "../lib/io.js";
@@ -47,7 +46,6 @@ function pickRepresentativeTask(tasksForRequest) {
 export const intakeFromWordPress = async (req, res) => {
   try {
     const src = req.body || {};
-    console.log("WP Intake:", src);
     const {
       firstName,
       lastName,
@@ -111,7 +109,7 @@ export const listProjects = async (req, res) => {
       return {
         ...p,
         status: prettyStatus(p.status),
-        taskDeadline: rep?.deadline ?? null,     // <- use this on the frontend
+        taskDeadline: rep?.deadline ?? null,
         taskStatus:   rep?.status   ?? null,
         taskUpdatedAt:rep?.updatedAt ?? null,
       };
@@ -257,34 +255,6 @@ export const pmReopenRequest = async (req, res) => {
     res.status(400).json({ success: false, message: e.message });
   }
 };
-
-/** ✅ NEW: Client action to request reopen */
-// export const clientRequestReopen = async (req, res) => {
-//   try {
-//     const { roomId, requestId } = req.body || {};
-//     let rid = roomId;
-
-//     // allow either roomId or requestId
-//     if (!rid && requestId) {
-//       const pr = await ProjectRequest.findById(requestId).lean();
-//       if (!pr?.chatRoom) return res.status(400).json({ success: false, message: "No room for this request" });
-//       rid = pr.chatRoom.toString();
-//     }
-
-//     if (!rid) return res.status(400).json({ success: false, message: "roomId or requestId is required" });
-
-//     const { room, project } = await projectService.clientRequestsReopen(rid, req.user, fromReq(req));
-
-//     res.json({
-//       success: true,
-//       room: { id: room._id, isClosed: !!room.isClosed, reopenRequestedByClient: !!room.reopenRequestedByClient },
-//       project: { id: project._id, status: project.status },
-//       message: "Reopen request sent to your PM.",
-//     });
-//   } catch (e) {
-//     res.status(400).json({ success: false, message: e.message });
-//   }
-// };
 
 /* ========================================================================== */
 /* DASH OVERVIEW */
@@ -523,7 +493,6 @@ export const createFromClient = async (req, res) => {
     // If a request with this clientKey already exists, CLAIM it for this user and ensure membership
     const existing = await ProjectRequest.findOne({ clientKey }).lean();
     if (existing) {
-      // If this PR is not owned by the current user, or has no owner, set owner to current user
       const shouldClaim =
         !existing.clientId ||
         existing.clientId.toString() !== me._id.toString();
@@ -534,7 +503,6 @@ export const createFromClient = async (req, res) => {
           {
             $set: {
               clientId: me._id,
-              // backfill identity fields only if empty
               firstName: existing.firstName || me.firstName || firstName || "",
               lastName: existing.lastName || me.lastName || lastName || "",
               email: existing.email || me.email || email || "",
@@ -543,7 +511,6 @@ export const createFromClient = async (req, res) => {
         );
       }
 
-      // If a room already exists, make sure the current user is a member
       if (existing.chatRoom) {
         await ChatRoom.updateOne(
           { _id: existing.chatRoom },
@@ -560,7 +527,6 @@ export const createFromClient = async (req, res) => {
       });
     }
 
-    // No existing PR — create a new one with the authenticated client as owner
     const payload = {
       firstName: firstName || me.firstName || "",
       lastName: lastName || me.lastName || "",
@@ -603,7 +569,6 @@ export const getProjectByRoom = async (req, res) => {
       return res.status(403).json({ success: false, message: "Forbidden" });
     }
 
-    // include representative task deadline for parity with other endpoints
     const tasks = await Task.find({ request: pr._id })
       .select("request deadline status updatedAt createdAt")
       .lean();
@@ -632,7 +597,6 @@ export const clientRequestReopen = async (req, res) => {
     const { roomId, requestId } = req.body || {};
     let rid = roomId;
 
-    // allow either roomId or requestId
     if (!rid && requestId) {
       const pr = await ProjectRequest.findById(requestId).lean();
       if (!pr?.chatRoom) return res.status(400).json({ success: false, message: "No room for this request" });

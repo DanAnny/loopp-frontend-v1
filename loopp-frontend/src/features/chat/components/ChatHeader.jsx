@@ -1,77 +1,69 @@
-// frontend/src/features/chat/components/ChatHeader.jsx
-import React from "react";
-import { MoreVertical, Search, ArrowLeft } from "lucide-react";
+import { Search } from "lucide-react";
 
-export default function ChatHeader({ contact, onBack, canClose=false, onClose, roomClosed=false }) {
-  const initials = contact?.name
-    ? contact.name.split(" ").map((n) => n[0]).join("").toUpperCase()
-    : "U";
+
+export default function ChatHeader({
+  contact,
+  onBack,
+  onSearchToggle,
+}) {
 
   return (
-    <div className="sticky top-0 z-10 h-16 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex items-center justify-between px-3 md:px-4">
-      <div className="flex items-center gap-3">
+    <div className="flex items-center justify-between px-4 py-3 border-b bg-white border-gray-200">
+      <div className="flex items-center gap-3 flex-1 min-w-0">
         {onBack && (
           <button
-            className="sm:hidden h-9 w-9 rounded-full hover:bg-muted grid place-items-center"
             onClick={onBack}
-            aria-label="Back to conversations"
-            title="Back"
+            className="sm:hidden p-2 -ml-2 rounded-full transition hover:bg-gray-100"
+            aria-label="Back"
+            type="button"
           >
-            <ArrowLeft className="h-5 w-5" />
+            <svg className="w-5 h-5 text-gray-900" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M15 18l-6-6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
         )}
 
-        <div className="relative">
-          {contact?.avatar ? (
-            <img src={contact.avatar} alt={contact.name} className="h-10 w-10 rounded-full ring-2 ring-foreground/10 object-cover" />
-          ) : (
-            <div className="h-10 w-10 rounded-full ring-2 ring-foreground/10 bg-foreground text-background grid place-items-center text-xs font-semibold">
-              {initials}
-            </div>
-          )}
-          {contact?.isOnline && (
-            <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-background rounded-full" />
-          )}
-        </div>
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <div className="relative flex-shrink-0">
+            {contact?.avatar ? (
+              <img
+                src={contact.avatar}
+                alt={contact?.name}
+                className="w-10 h-10 rounded-full object-cover"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full grid place-items-center bg-gradient-to-br from-gray-200 to-gray-300">
+                <span className="text-sm font-semibold text-gray-700">
+                  {(contact?.name || "U").charAt(0).toUpperCase()}
+                </span>
+              </div>
+            )}
+            {contact?.isOnline ? (
+              <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full" />
+            ) : null}
+          </div>
 
-        <div className="flex flex-col">
-          <h2 className="font-medium text-foreground">{contact?.name || "Unknown"}</h2>
-          <p className="text-xs text-muted-foreground">
-            {roomClosed ? "Closed" : contact?.status || "—"}
-          </p>
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold text-[15px] truncate text-gray-900">
+              {contact?.name || "Unknown"}
+            </div>
+            <div className="text-xs truncate flex items-center gap-3 text-gray-600">
+              <span className="truncate">{contact?.status || "—"}</span>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        {/* PM-only close action */}
-        {canClose && !roomClosed && (
-          <button
-            type="button"
-            onClick={onClose}
-            className="hidden sm:inline-flex items-center px-3 h-9 rounded-full bg-foreground text-background hover:bg-foreground/90"
-            title="Close Room"
-          >
-            Close Room
-          </button>
-        )}
-
-        <div className="hidden sm:flex items-center gap-1">
-          <IconButton><Search className="h-4 w-4" /></IconButton>
-          <IconButton><MoreVertical className="h-4 w-4" /></IconButton>
-        </div>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={onSearchToggle}
+          className="p-2 rounded-full transition hover:bg-gray-100"
+          aria-label="Search messages"
+          type="button"
+        >
+          <Search className="w-4 h-4 text-gray-700" />
+        </button>
       </div>
     </div>
-  );
-}
-
-function IconButton({ children, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      type="button"
-      className="h-9 w-9 rounded-full hover:bg-muted transition grid place-items-center"
-    >
-      {children}
-    </button>
   );
 }

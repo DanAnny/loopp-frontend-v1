@@ -10,13 +10,131 @@ import {
   getSocket,
   joinRoom as joinSocketRoom,
 } from "@/lib/socket";
-
 import * as Projects from "@/services/projects.service";
 
+// shared UI
 import ConversationList from "@/features/chat/components/ConversationList";
 import ChatHeader from "@/features/chat/components/ChatHeader";
 import ChatInput from "@/features/chat/components/ChatInput";
 import MessageBubble from "@/features/chat/components/MessageBubble";
+
+// ui helpers
+import SearchBar from "@/features/chat/components/SearchBar";
+import InlineNotification from "@/features/chat/components/InlineNotification";
+import ChatBackground from "@/features/chat/components/ChatBackground";
+import UnreadMessagesIndicator from "@/features/chat/components/UnreadMessagesIndicator";
+import RatingModal from "../components/RatingModal";
+
+/* -------------------------------------------------------------------------- */
+/*                               tiny primitives                              */
+/* -------------------------------------------------------------------------- */
+
+// Minimal portal (no external deps)
+function Portal({ children }) {
+  const [mounted, setMounted] = useState(false);
+  const elRef = useRef(null);
+  if (!elRef.current && typeof document !== "undefined") {
+    const el = document.createElement("div");
+    el.style.position = "fixed";
+    el.style.inset = "0";
+    el.style.pointerEvents = "none";
+    el.style.zIndex = "9999";
+    elRef.current = el;
+  }
+  useEffect(() => {
+    if (!elRef.current) return;
+    document.body.appendChild(elRef.current);
+    setMounted(true);
+    return () => {
+      try {
+        document.body.removeChild(elRef.current);
+      } catch {}
+    };
+  }, []);
+  if (!mounted) return null;
+  return (
+    <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+      {children}
+    </div>
+  );
+}
+
+// Viewport-bounded context menu (fixes overflow issues)
+function ContextMenu({ open, x, y, items, onClose }) {
+  const menuRef = useRef(null);
+
+  // bound within viewport
+  const [pos, setPos] = useState({ left: x, top: y });
+
+  useEffect(() => {
+    if (!open) return;
+    const id = requestAnimationFrame(() => {
+      const menu = menuRef.current;
+      if (!menu) return;
+      const { innerWidth: W, innerHeight: H } = window;
+      const rect = menu.getBoundingClientRect();
+      let nx = x;
+      let ny = y;
+      if (nx + rect.width > W - 8) nx = Math.max(8, W - rect.width - 8);
+      if (ny + rect.height > H - 8) ny = Math.max(8, H - rect.height - 8);
+      setPos({ left: nx, top: ny });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [open, x, y]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onAny = (e) => {
+      if (e.type === "keydown" && e.key !== "Escape") return;
+      onClose?.();
+    };
+    window.addEventListener("click", onAny, { capture: true });
+    window.addEventListener("contextmenu", onAny, { capture: true });
+    window.addEventListener("keydown", onAny);
+    return () => {
+      window.removeEventListener("click", onAny, { capture: true });
+      window.removeEventListener("contextmenu", onAny, { capture: true });
+      window.removeEventListener("keydown", onAny);
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <Portal>
+      <div
+        ref={menuRef}
+        style={{
+          position: "fixed",
+          left: pos.left,
+          top: pos.top,
+          pointerEvents: "auto",
+        }}
+        className="min-w-44 max-w-[70vw] rounded-xl border border-gray-200 bg-white shadow-2xl overflow-hidden"
+      >
+        <ul className="py-1">
+          {items.map((it) => (
+            <li key={it.id}>
+              <button
+                onClick={() => {
+                  it.onClick?.();
+                  onClose?.();
+                }}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+              >
+                {it.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Portal>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                tiny helpers                                */
+/* -------------------------------------------------------------------------- */
 
 const shortName = (s, m = 28) => {
   const t = (s || "").toString().trim();
@@ -46,7 +164,6 @@ const roleToTheme = (role, isMine) => {
   return "client";
 };
 
-/** Strict message shaping with explicit System handling */
 const shapeForClient = (m) => {
   const created =
     m.createdAt || m.createdAtISO || m.timestamp || new Date().toISOString();
@@ -114,13 +231,52 @@ function previewText(m) {
   return m.content || "—";
 }
 
-/* ----- Inline dashed notices (presence banners) ----- */
+/* ---------- date grouping for separators (UI-only) --- */
+const formatDateSeparator = (date) => {
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  const isToday = date.toDateString() === today.toDateString();
+  const isYesterday = date.toDateString() === yesterday.toDateString();
+
+  if (isToday) return "Today";
+  if (isYesterday) return "Yesterday";
+
+  const weekAgo = new Date(today);
+  weekAgo.setDate(weekAgo.getDate() - 7);
+
+  if (date > weekAgo) {
+    return date.toLocaleDateString("en-US", { weekday: "long" });
+  }
+
+  return date.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+const groupMessagesByDate = (messages) => {
+  const groups = {};
+  messages.forEach((msg) => {
+    const d = msg.createdAtISO ? new Date(msg.createdAtISO) : new Date();
+    const key = d.toDateString();
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(msg);
+  });
+  return Object.keys(groups).map((key) => ({
+    date: formatDateSeparator(new Date(key)),
+    messages: groups[key],
+  }));
+};
+
+/* ----- Inline dashed notices (presence banners) ---- */
 function InlineNotice({ text }) {
   return (
     <div className="my-3 flex items-center justify-center">
       <div className="w-full text-center text-[11px] md:text-xs tracking-wide text-black/65">
-        {"—".repeat(6)}{" "}
-        <span className="font-semibold uppercase">{text}</span>{" "}
+        {"—".repeat(6)} <span className="font-semibold uppercase">{text}</span>{" "}
         {"—".repeat(6)}
       </div>
     </div>
@@ -143,7 +299,6 @@ function noticeFromSystemEvent(ev = {}) {
     case "engineer_accepted":
       return "ENGINEER HAS ACCEPTED THE TASK AND WILL BE JOINING THE ROOM";
     case "engineer_joined":
-      return "ENGINEER IS IN THE ROOM";
     case "engineer_online":
       return "ENGINEER IS IN THE ROOM";
     default:
@@ -151,7 +306,18 @@ function noticeFromSystemEvent(ev = {}) {
   }
 }
 
-/* ------------------ Rating UI (unchanged) ------------------ */
+/* ---------------------- tiny toast ---------------------- */
+function useToast() {
+  const [toast, setToast] = useState(null);
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(t);
+  }, [toast]);
+  return [toast, setToast];
+}
+
+/* ------------------ Rating UI (kept) ------------------ */
 function Stars({ value, onChange, label }) {
   return (
     <div className="space-y-2">
@@ -163,7 +329,11 @@ function Stars({ value, onChange, label }) {
             type="button"
             onClick={() => onChange(n)}
             className={`w-9 h-9 rounded-full border border-black/20 grid place-items-center transition
-              ${value >= n ? "bg-black text-white" : "bg-white hover:bg-black/[0.05]"}`}
+              ${
+                value >= n
+                  ? "bg-black text-white"
+                  : "bg-white hover:bg-black/[0.05]"
+              }`}
             aria-label={`${label}: ${n} star${n > 1 ? "s" : ""}`}
           >
             ★
@@ -210,7 +380,9 @@ function RatingSheet({ requestId, onClose, onRated }) {
       });
       onRated?.();
     } catch (e) {
-      setErr(e?.response?.data?.message || e?.message || "Failed to submit rating");
+      setErr(
+        e?.response?.data?.message || e?.message || "Failed to submit rating"
+      );
     } finally {
       setSubmitting(false);
     }
@@ -218,7 +390,7 @@ function RatingSheet({ requestId, onClose, onRated }) {
 
   return (
     <div
-      className="fixed inset-x-0 bottom-0 z-[60] md:left-[max(0px,calc(50%-44rem))] md:right-[max(0px,calc(50%-44rem))] bg-white border-t border-black/10 shadow-[0_-8px_30px_rgba(0,0,0,0.12)]"
+      className="fixed inset-x-0 bottom-0 z-[60] md:left-[max(0px,calc(50%-44rem))] md:right-[max(0px,calc(50%-44rem))] bg-white border-t border-black/10 shadow-[0_-8px_30px_rgba(0,0,0,0.12)] animate-slide-in"
       role="dialog"
       aria-modal="true"
     >
@@ -227,7 +399,8 @@ function RatingSheet({ requestId, onClose, onRated }) {
           <div>
             <h4 className="text-lg font-semibold text-black">Rate your experience</h4>
             <p className="text-sm text-black/60">
-              Please rate your Project Manager, Engineer, and Teamwork. Comments are required.
+              Please rate your Project Manager, Engineer, and Teamwork.
+              Comments are required.
             </p>
           </div>
           <button
@@ -295,18 +468,58 @@ function RatingSheet({ requestId, onClose, onRated }) {
   );
 }
 
-/* ---------------------- tiny toast ---------------------- */
-function useToast() {
-  const [toast, setToast] = useState(null);
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 2500);
-    return () => clearTimeout(t);
-  }, [toast]);
-  return [toast, setToast];
+/* --------------------------- presence utilities --------------------------- */
+/**
+ * Three-state presence:
+ * - ONLINE: actively in this room
+ * - AWAY: online but not in this room
+ * - OFFLINE: not online
+ *
+ * We track presence by room with a small member list. Each item:
+ *   { id: "PM"|"Engineer"|"Client"|string, role, name, status }
+ */
+const STATUS_ONLINE = "online";
+const STATUS_AWAY = "away";
+const STATUS_OFFLINE = "offline";
+
+function upsertMember(map, roomId, idKey, role, name, status) {
+  const cur = map[roomId] || { members: [] };
+  const members = [...cur.members];
+  const idx = members.findIndex((m) => (m.id || m.role) === idKey);
+  const next = { id: idKey, role, name, status };
+  if (idx === -1) members.push(next);
+  else members[idx] = { ...members[idx], ...next };
+  return { ...map, [roomId]: { members } };
 }
 
-/* ----------------------- component ----------------------- */
+function setStatus(map, roomId, idKey, status) {
+  const cur = map[roomId] || { members: [] };
+  const members = cur.members.map((m) =>
+    (m.id || m.role) === idKey ? { ...m, status } : m
+  );
+  return { ...map, [roomId]: { members } };
+}
+
+function ensureSeedParticipants(map, roomId, meta) {
+  let next = { ...map };
+  // Always seed client (You) => ONLINE in this room
+  next = upsertMember(next, roomId, "Client", "Client", "You", STATUS_ONLINE);
+
+  // Seed PM/Engineer as AWAY by default (online but not yet active in this room)
+  const pm = meta?.pm || meta?.project?.pm || meta?.room?.pm || meta?.userPM;
+  if (pm) {
+    const pmName = [pm.firstName, pm.lastName].filter(Boolean).join(" ").trim() || "PM";
+    next = upsertMember(next, roomId, "PM", "PM", pmName, STATUS_AWAY);
+  }
+  const eng = meta?.engineer || meta?.project?.engineer || meta?.room?.engineer;
+  if (eng) {
+    const engName = [eng.firstName, eng.lastName].filter(Boolean).join(" ").trim() || "Engineer";
+    next = upsertMember(next, roomId, "Engineer", "Engineer", engName, STATUS_AWAY);
+  }
+  return next;
+}
+
+/* ----------------------- main component ----------------------- */
 export default function ClientChat() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -314,7 +527,11 @@ export default function ClientChat() {
   const [rooms, setRooms] = useState([]);
   const [activeRoomId, setActiveRoomId] = useState(null);
 
-  const [header, setHeader] = useState({ name: "Chat", status: "Online", avatar: "" });
+  const [header, setHeader] = useState({
+    name: "Chat",
+    status: "Online",
+    avatar: "",
+  });
   const [messages, setMessages] = useState([]);
 
   const [typingByRoom, setTypingByRoom] = useState({});
@@ -324,6 +541,28 @@ export default function ClientChat() {
   const [hasRated, setHasRated] = useState(false);
   const [reopenRequested, setReopenRequested] = useState(false);
 
+  // UI
+  const [showSearch, setShowSearch] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [highlightedMessageId, setHighlightedMessageId] = useState(null);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+
+  // Presence (role-keyed & 3-state)
+  const [presenceByRoom, setPresenceByRoom] = useState({});
+  const [presenceOpen, setPresenceOpen] = useState(false);
+
+  // Context menu
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
+  const lastRightClickText = useRef("");
+
+  const scrollerRef = useRef(null);
+  const atBottomRef = useRef(true);
+  const lastCountRef = useRef(0);
+  const messageRefs = useRef({});
+
   const typingText = useMemo(() => {
     if (!activeRoomId) return "";
     const map = typingByRoom[activeRoomId] || {};
@@ -331,20 +570,12 @@ export default function ClientChat() {
     if (!others.length) return "";
     const first = others[0];
     const label = first.role || "PM/Engineer";
-    return others.length === 1 ? `${label} is typing…` : `${label} and ${others.length - 1} other(s) are typing…`;
+    return others.length === 1
+      ? `${label} is typing…`
+      : `${label} and ${others.length - 1} other(s) are typing…`;
   }, [typingByRoom, activeRoomId]);
 
-  const scrollerRef = useRef(null);
-  const atBottomRef = useRef(true);
-
-  const handleScroll = () => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    const threshold = 120;
-    distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    atBottomRef.current = distanceFromBottom < threshold;
-  };
-
+  /* ------------------ typing expiry ticker ------------------ */
   useEffect(() => {
     const id = setInterval(() => {
       setTypingByRoom((prev) => {
@@ -355,6 +586,8 @@ export default function ClientChat() {
           const map = { ...next[rid] };
           for (const uid of Object.keys(map)) {
             if (map[uid].until < now) {
+              // decay presence to AWAY (not OFFLINE) when typing expires
+              setPresenceByRoom((p) => setStatus(p, rid, uid, STATUS_AWAY));
               delete map[uid];
               changed = true;
             }
@@ -367,7 +600,7 @@ export default function ClientChat() {
     return () => clearInterval(id);
   }, []);
 
-  // initial rooms load
+  /* --------------------- initial rooms load --------------------- */
   useEffect(() => {
     (async () => {
       try {
@@ -378,21 +611,24 @@ export default function ClientChat() {
         const list = Array.isArray(data?.rooms) ? data.rooms : [];
         list.sort(
           (a, b) =>
-            new Date(b.updatedAtISO || b.updatedAt) - new Date(a.updatedAtISO || a.updatedAt)
+            new Date(b.updatedAtISO || b.updatedAt) -
+            new Date(a.updatedAtISO || a.updatedAt)
         );
         setRooms(list);
 
         const firstReal = list.find((r) => r.hasRoom);
         setActiveRoomId(firstReal?.id || null);
       } catch (e) {
-        setErr(e?.response?.data?.message || e?.message || "Failed to load rooms");
+        setErr(
+          e?.response?.data?.message || e?.message || "Failed to load rooms"
+        );
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  // join + live listeners
+  /* ---------------- join + live listeners (+presence) ---------------- */
   useEffect(() => {
     if (!activeRoomId) return;
     const active = rooms.find((r) => r.id === activeRoomId);
@@ -408,14 +644,25 @@ export default function ClientChat() {
         const shaped = (res?.messages || []).map(shapeForClient);
         setMessages(shaped);
 
-        let closed = Boolean(active?.isClosed === true || active?.isClosed === "true");
-        let reopen = false;
+        // Room meta – seed participants (PM/Engineer if available) + Client (You)
+        let roomMeta = {};
         try {
           const metaRes = await Projects.getRoomMeta(activeRoomId);
-          const roomMeta = metaRes?.data?.room || metaRes?.room || {};
-          if (typeof roomMeta?.isClosed === "boolean") closed = roomMeta.isClosed;
-          reopen = !!roomMeta?.reopenRequested;
+          roomMeta = metaRes?.data?.room || metaRes?.room || metaRes || {};
         } catch {}
+
+        setPresenceByRoom((prev) => {
+          // Client = ONLINE, PM/Engineer = AWAY by default
+          let next = ensureSeedParticipants(prev, activeRoomId, roomMeta);
+          return next;
+        });
+
+        // header + reopen flag
+        let closed = Boolean(
+          active?.isClosed === true || active?.isClosed === "true"
+        );
+        let reopen = !!roomMeta?.reopenRequested;
+        if (typeof roomMeta?.isClosed === "boolean") closed = roomMeta.isClosed;
 
         setHeader({
           name: shortName(active?.title || "Project Chat"),
@@ -424,19 +671,35 @@ export default function ClientChat() {
         });
         setReopenRequested(reopen);
 
+        // scroller & scroll listener
         const el = scrollerRef.current;
         if (el) {
-          el.addEventListener("scroll", handleScroll, { passive: true });
+          const onScroll = () => {
+            const threshold = 120;
+            const atBottom =
+              el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+            atBottomRef.current = atBottom;
+            setIsAtBottom(atBottom);
+            if (atBottom) setUnreadCount(0);
+          };
+          el.addEventListener("scroll", onScroll, { passive: true });
           requestAnimationFrame(() => {
             el.scrollTop = el.scrollHeight;
             atBottomRef.current = true;
+            setIsAtBottom(true);
           });
+          unsub = () => {
+            try {
+              el.removeEventListener("scroll", onScroll);
+            } catch {}
+          };
         }
 
         const s = connectSocket();
         await waitForSocketConnected(getSocket());
         await joinSocketRoom(activeRoomId);
 
+        // message
         const onMessage = (m) => {
           const rid = String(m.room?._id || m.room);
           const shapedMsg = shapeForClient(m);
@@ -463,51 +726,100 @@ export default function ClientChat() {
                 top: scrollerRef.current.scrollHeight,
                 behavior: "smooth",
               });
+              setIsAtBottom(true);
+              setUnreadCount(0);
             });
+          } else {
+            setUnreadCount((c) => c + 1);
           }
         };
 
-        const onTyping = ({ roomId, userId, role, isTyping }) => {
-          if (String(roomId) !== String(activeRoomId)) return;
+        // typing -> mark role ONLINE in this room; decay to AWAY via ticker above
+        const onTyping = ({ roomId, role, isTyping, name }) => {
           const displayRole = normalizeRole(role) || "PM/Engineer";
+          if (String(roomId) !== String(activeRoomId)) return;
+
           setTypingByRoom((prev) => {
             const map = { ...(prev[roomId] || {}) };
-            if (isTyping) map[userId] = { role: displayRole, until: Date.now() + 2500 };
-            else delete map[userId];
+            const key = displayRole; // stable key by role
+            if (isTyping) map[key] = { role: displayRole, until: Date.now() + 2500 };
+            else delete map[key];
             return { ...prev, [roomId]: map };
           });
+
+          if (isTyping) {
+            const idKey = displayRole;
+            setPresenceByRoom((prev) =>
+              upsertMember(
+                prev,
+                activeRoomId,
+                idKey,
+                displayRole,
+                name || displayRole,
+                STATUS_ONLINE
+              )
+            );
+          }
         };
 
-        // presence banners (optional, separate from permanent system bubbles)
+        // system events: update inline notices + presence states
         const onSystem = (payload = {}) => {
           const rid = String(payload.roomId || payload.room || "");
-          if (rid && rid !== String(activeRoomId)) return;
+          const type = String(payload.type || "").toLowerCase();
+          const pm = payload.pm || payload.user || {};
+          const eng = payload.engineer || {};
 
-          const label = noticeFromSystemEvent(payload);
-          if (!label) return;
-
-          const msg = {
-            _id: `sys-${payload.type}-${payload.timestamp || Date.now()}-${Math.random()}`,
-            room: rid || String(activeRoomId),
-            inlineNotice: true,
-            noticeText: label,
-            createdAtISO: payload.timestamp || new Date().toISOString(),
-          };
-
-          setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last?.inlineNotice && last.noticeText === label) return prev;
-            return [...prev, msg];
-          });
-
-          if (atBottomRef.current) {
-            requestAnimationFrame(() => {
-              scrollerRef.current?.scrollTo({
-                top: scrollerRef.current.scrollHeight,
-                behavior: "smooth",
+          // inline banner only for this room
+          if (!rid || rid === String(activeRoomId)) {
+            const label = noticeFromSystemEvent(payload);
+            if (label) {
+              const msg = {
+                _id: `sys-${payload.type}-${payload.timestamp || Date.now()}-${Math.random()}`,
+                room: String(activeRoomId),
+                inlineNotice: true,
+                noticeText: label,
+                createdAtISO: payload.timestamp || new Date().toISOString(),
+              };
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.inlineNotice && last.noticeText === label) return prev;
+                return [...prev, msg];
               });
-            });
+              if (atBottomRef.current) {
+                requestAnimationFrame(() => {
+                  scrollerRef.current?.scrollTo({
+                    top: scrollerRef.current.scrollHeight,
+                    behavior: "smooth",
+                  });
+                });
+              }
+            }
           }
+
+          // presence updates (role-keyed)
+          setPresenceByRoom((prev) => {
+            let next = { ...prev };
+            const pmName = [pm?.firstName, pm?.lastName].filter(Boolean).join(" ").trim() || "PM";
+            const engName = [eng?.firstName, eng?.lastName].filter(Boolean).join(" ").trim() || "Engineer";
+
+            if (!rid || rid === String(activeRoomId)) {
+              if (type === "pm_assigned") {
+                // PM exists but may not be in the room yet -> AWAY
+                next = upsertMember(next, activeRoomId, "PM", "PM", pmName, STATUS_AWAY);
+              }
+              if (type === "pm_online") {
+                // When we do receive it (if broadcast), consider ACTIVE in room now
+                next = upsertMember(next, activeRoomId, "PM", "PM", pmName, STATUS_ONLINE);
+              }
+              if (type === "pm_assigned_engineer" || type === "engineer_joined") {
+                next = upsertMember(next, activeRoomId, "Engineer", "Engineer", engName, STATUS_ONLINE);
+              }
+              if (type === "engineer_online") {
+                next = upsertMember(next, activeRoomId, "Engineer", "Engineer", engName, STATUS_ONLINE);
+              }
+            }
+            return next;
+          });
         };
 
         const onRoomClosed = (payload = {}) => {
@@ -521,6 +833,18 @@ export default function ClientChat() {
           );
           setHeader((h) => ({ ...h, status: "Closed" }));
           setToast({ text: "This room has been closed.", kind: "warn" });
+          setNotifications((n) => [
+            ...n,
+            {
+              id: `notif-${Date.now()}`,
+              type: "warning",
+              message: "Room closed",
+              timestamp: new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            },
+          ]);
         };
 
         const onRoomReopened = (payload = {}) => {
@@ -535,6 +859,18 @@ export default function ClientChat() {
           setReopenRequested(false);
           setHeader((h) => ({ ...h, status: "Online" }));
           setToast({ text: "This room has been reopened.", kind: "ok" });
+          setNotifications((n) => [
+            ...n,
+            {
+              id: `notif-${Date.now()}`,
+              type: "success",
+              message: "Room reopened",
+              timestamp: new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            },
+          ]);
         };
 
         const onReopenRequested = (payload = {}) => {
@@ -542,9 +878,20 @@ export default function ClientChat() {
           if (rid && rid !== String(activeRoomId)) return;
           setReopenRequested(true);
           setToast({ text: "Reopen request sent.", kind: "ok" });
+          setNotifications((n) => [
+            ...n,
+            {
+              id: `notif-${Date.now()}`,
+              type: "success",
+              message: "Reopen request sent",
+              timestamp: new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            },
+          ]);
         };
 
-        // 🔔 NEW: PM was assigned → update list preview, header, and push an inline notice immediately
         const onPmAssigned = (payload = {}) => {
           const rid = String(payload.roomId || payload.room || "");
           if (rid && rid !== String(activeRoomId)) return;
@@ -553,7 +900,6 @@ export default function ClientChat() {
           const pmLast = payload?.pm?.lastName || "";
           const pmName = [pmFirst, pmLast].filter(Boolean).join(" ").trim() || "PM";
 
-          // Update conversation list preview
           setRooms((prev) =>
             prev.map((r) =>
               String(r.id) === String(activeRoomId)
@@ -566,7 +912,6 @@ export default function ClientChat() {
             )
           );
 
-          // Insert an inline notice (non-persistent UI banner)
           const inline = {
             _id: `pm-assigned-inline-${payload?.at || Date.now()}-${Math.random()}`,
             room: String(activeRoomId),
@@ -576,14 +921,16 @@ export default function ClientChat() {
           };
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (last?.inlineNotice && last.noticeText === inline.noticeText) return prev;
+            if (last?.inlineNotice && last.noticeText === inline.noticeText)
+              return prev;
             return [...prev, inline];
           });
 
-          // Keep the header "Online" (even if PM hasn't spoken yet)
-          setHeader((h) => ({ ...h, status: h.status === "Closed" ? "Closed" : "Online" }));
+          // PM appears as AWAY (until they type / join)
+          setPresenceByRoom((prev) =>
+            upsertMember(prev, activeRoomId, "PM", "PM", pmName, STATUS_AWAY)
+          );
 
-          // Scroll to bottom if user is at the end
           if (atBottomRef.current) {
             requestAnimationFrame(() => {
               scrollerRef.current?.scrollTo({
@@ -610,27 +957,45 @@ export default function ClientChat() {
         s.on("room:reopened", onRoomReopened);
         s.on("reopen:requested", onReopenRequested);
         s.on("room:pm_assigned", onPmAssigned);
-
-        unsub = () => {
-          try {
-            s.off("message", onMessage);
-            s.off("typing", onTyping);
-            s.off("system", onSystem);
-            s.off("room:closed", onRoomClosed);
-            s.off("room:reopened", onRoomReopened);
-            s.off("reopen:requested", onReopenRequested);
-            s.off("room:pm_assigned", onPmAssigned);
-          } catch {}
-          if (el) el.removeEventListener("scroll", handleScroll);
-        };
       } catch (e) {
         setErr(e?.response?.data?.message || e?.message || "Failed to load messages");
       }
     })();
 
-    return () => unsub();
+    return () => {
+      try {
+        const s = getSocket();
+        if (s) {
+          s.off("message");
+          s.off("typing");
+          s.off("system");
+          s.off("room:closed");
+          s.off("room:reopened");
+          s.off("reopen:requested");
+          s.off("room:pm_assigned");
+        }
+      } catch {}
+      unsub?.();
+    };
   }, [activeRoomId, rooms]);
 
+  /* ----- ensure "You" is ONLINE when switching rooms ----- */
+  useEffect(() => {
+    if (!activeRoomId) return;
+    setPresenceByRoom((prev) => setStatus(prev, activeRoomId, "Client", STATUS_ONLINE));
+    setPresenceOpen(false);
+  }, [activeRoomId]);
+
+  /* ----- unread & autoscroll on change ----- */
+  useEffect(() => {
+    if (!scrollerRef.current) return;
+    const count = messages.length;
+    const added = count - (lastCountRef.current || 0);
+    if (added > 0 && !isAtBottom) setUnreadCount((c) => c + added);
+    lastCountRef.current = count;
+  }, [messages, isAtBottom]);
+
+  /* ------------------------------- actions ------------------------------ */
   const onSend = async (text, files = []) => {
     const active = rooms.find((r) => r.id === activeRoomId);
     if (!activeRoomId || !active?.hasRoom || active?.isClosed || header.status === "Closed") return;
@@ -696,6 +1061,15 @@ export default function ClientChat() {
               : r
           )
         );
+
+        requestAnimationFrame(() => {
+          scrollerRef.current?.scrollTo({
+            top: scrollerRef.current.scrollHeight,
+            behavior: "smooth",
+          });
+          setIsAtBottom(true);
+          setUnreadCount(0);
+        });
       }
     } catch (e) {
       setErr(e?.response?.data?.message || e?.message || "Failed to send");
@@ -715,12 +1089,82 @@ export default function ClientChat() {
     });
   };
 
-  const BackIcon = () => (
-    <svg className="w-5 h-5 md:w-6 md:h-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M10 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4 12h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
+  const handleRequestReopen = async () => {
+    try {
+      const active = rooms.find((r) => r.id === activeRoomId);
+      const reqId = active?.requestId;
+      if (!reqId) throw new Error("Missing request id.");
+      await Projects.requestReopen({ requestId: reqId });
+      setReopenRequested(true);
+      setToast({ text: "Reopen request sent to your PM.", kind: "ok" });
+      setNotifications((n) => [
+        ...n,
+        {
+          id: `notif-${Date.now()}`,
+          type: "success",
+          message: "Reopen request sent",
+          timestamp: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        },
+      ]);
+    } catch (e) {
+      setToast({
+        text:
+          e?.response?.data?.message || e?.message || "Failed to request reopen",
+        kind: "error",
+      });
+    }
+  };
+
+  const handleSearchResultSelect = (index) => {
+    const flat = messages;
+    const m = flat[index];
+    if (!m) return;
+    setHighlightedMessageId(m._id);
+    const node = messageRefs.current[m._id];
+    if (node) {
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => setHighlightedMessageId(null), 2000);
+    }
+  };
+
+  /* ----------------------- context menu handlers ----------------------- */
+  const handleContextMenu = (e) => {
+    e.preventDefault();
+    const sel = window.getSelection?.();
+    const selectedText = sel && String(sel.toString()).trim();
+    lastRightClickText.current =
+      selectedText ||
+      (e.target?.innerText ? String(e.target.innerText).trim().slice(0, 2000) : "");
+    setMenuPos({ x: e.clientX, y: e.clientY });
+    setMenuOpen(true);
+  };
+
+  const contextMenuItems = [
+    {
+      id: "copy-text",
+      label: "Copy selected text",
+      onClick: () => {
+        const sel = window.getSelection?.();
+        const s = sel && String(sel.toString());
+        if (s) navigator.clipboard?.writeText(s);
+      },
+    },
+    {
+      id: "copy-msg",
+      label: "Copy message",
+      onClick: () => {
+        const t = lastRightClickText.current || "";
+        if (t) navigator.clipboard?.writeText(t);
+      },
+    },
+    { id: "reply", label: "Reply", onClick: () => {} },
+    { id: "delete", label: "Delete (if allowed)", onClick: () => {} },
+  ];
+
+  /* --------------------------------- render --------------------------------- */
 
   if (loading) return <div className="h-screen grid place-items-center">Loading chat…</div>;
   if (err) return <div className="h-screen grid place-items-center text-red-600">{err}</div>;
@@ -736,93 +1180,311 @@ export default function ClientChat() {
   const active = rooms.find((r) => r.id === activeRoomId);
   const requestIdForRating = active?.requestId;
 
-  const handleRequestReopen = async () => {
-    try {
-      const reqId = active?.requestId;
-      if (!reqId) throw new Error("Missing request id.");
-      await Projects.requestReopen({ requestId: reqId });
-      setReopenRequested(true);
-      setToast({ text: "Reopen request sent to your PM.", kind: "ok" });
-    } catch (e) {
-      setToast({
-        text: e?.response?.data?.message || e?.message || "Failed to request reopen",
-        kind: "error",
+  // Presence model -> participants for header
+  const members = (presenceByRoom[activeRoomId]?.members || []);
+  const totalUsers = members.length;
+
+  const participantsForHeader = members.map((m) => ({
+    id: m.id || m.role,
+    name: m.name,
+    role: m.role,
+    // Map our 3-state to ChatHeader expectations:
+    isOnline: m.status !== STATUS_OFFLINE,   // online or away
+    inRoom: m.status === STATUS_ONLINE,      // active in this room
+  }));
+
+  // Header data (status line uses typingText when online)
+  const headerData = {
+    ...header,
+    status: header.status === "Online" ? typingText || "Online" : header.status,
+    isOnline: header.status !== "Closed",
+  };
+
+  const [onlineList, awayList, offlineList] = [
+    members.filter((m) => m.status === STATUS_ONLINE),
+    members.filter((m) => m.status === STATUS_AWAY),
+    members.filter((m) => m.status === STATUS_OFFLINE),
+  ];
+
+  const scrollToBottom = () => {
+    if (scrollerRef.current) {
+      scrollerRef.current.scrollTo({
+        top: scrollerRef.current.scrollHeight,
+        behavior: "smooth",
       });
     }
+    setIsAtBottom(true);
+    setUnreadCount(0);
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-white text-black">
-      <div className="fixed top-0 left-0 right-0 z-40 w-full bg-white/95 border-b border-black/10 backdrop-blur">
-        <div className="max-w-6xl mx-auto px-3 md:px-4 h-12 md:h-14 flex items-center justify-between">
-          <a href="/" className="backlink inline-flex items-center gap-2 px-2 py-1 rounded-full text-sm font-medium hover:bg-black/[0.03] focus-visible:bg-black/[0.05] transition" title="Back">
-            <span className="ico text-black/80"><BackIcon /></span>
+    <div className="h-screen flex flex-col bg-white text-black">
+      {/* Fixed minimal top bar (brand/back) */}
+      <div className="flex-none h-12 md:h-14 w-full border-b z-40 bg-white border-gray-200">
+        <div className="h-full max-w-[1920px] mx-auto px-3 md:px-4 flex items-center justify-between">
+          <a
+            href="/"
+            className="inline-flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm font-medium transition hover:bg-gray-100"
+            title="Back"
+          >
+            <svg className="w-5 h-5 md:w-6 md:h-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M10 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M4 12h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
             <span className="hidden sm:inline">Back</span>
           </a>
-          <div className="text-sm text-black/60 px-2">Client Chat</div>
+          <div className="text-sm font-medium text-gray-600">Client Chat</div>
+          <button
+            onClick={() => setShowSidebar(true)}
+            className="sm:hidden px-3 py-1.5 text-sm font-medium rounded-lg transition hover:bg-gray-100"
+          >
+            Rooms
+          </button>
         </div>
       </div>
 
-      <div className="h-12 md:h-14" />
+      {/* Main Layout */}
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        {/* Mobile Sidebar Overlay */}
+        {showSidebar && (
+          <div className="fixed inset-0 z-50 sm:hidden">
+            <div
+              className="absolute inset-0 bg-black/40 animate-fade-in"
+              onClick={() => setShowSidebar(false)}
+            />
+            <aside className="absolute inset-y-0 left-0 w-[85%] max-w-sm shadow-2xl flex flex-col animate-slide-left bg-white">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white">
+                <h2 className="font-semibold">Conversations</h2>
+                <button
+                  onClick={() => setShowSidebar(false)}
+                  className="p-2 rounded-lg text-xl leading-none hover:bg-gray-100"
+                >
+                  ×
+                </button>
+              </div>
 
-      <div className="h-[calc(100vh-48px)] md:h-[calc(100vh-56px)] flex bg-white text-black overflow-hidden">
-        <aside className="hidden sm:flex w-80 max-w-[22rem] flex-col border-r border-black/10 overflow-y-auto">
-          <ConversationList
-            conversations={rooms.map((r) => ({
-              id: r.id,
-              name: shortName(r.title),
-              avatar: "",
-              lastMessage: r.lastMessage || "",
-              time: new Date(r.updatedAtISO || r.updatedAt || Date.now()).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              }),
-              unreadCount: 0,
-              isOnline: !r.isClosed,
-              isPinned: false,
-              typing: !!typingByRoom[r.id] && Object.keys(typingByRoom[r.id]).length > 0,
-            }))}
-            activeConversationId={activeRoomId}
-            onConversationSelect={(id) => setActiveRoomId(id)}
-            loading={false}
-            error={""}
-          />
-        </aside>
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <ConversationList
+                  conversations={rooms.map((r) => ({
+                    id: r.id,
+                    name: shortName(r.title),
+                    avatar: "",
+                    lastMessage: r.lastMessage || "",
+                    time: new Date(r.updatedAtISO || r.updatedAt || Date.now()).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }),
+                    unreadCount: 0,
+                    isOnline: !r.isClosed,
+                    isPinned: false,
+                    typing: !!typingByRoom[r.id] && Object.keys(typingByRoom[r.id]).length > 0,
+                  }))}
+                  activeConversationId={activeRoomId}
+                  onConversationSelect={(id) => {
+                    setActiveRoomId(id);
+                    setShowSidebar(false);
+                  }}
+                  loading={false}
+                  error={""}
+                />
+              </div>
+            </aside>
+          </div>
+        )}
 
-        <section className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          <div className="sticky top-0 z-30 bg-white border-b border-black/10">
-            <ChatHeader
-              contact={{
-                ...header,
-                status: header.status === "Online" ? typingText || "Online" : header.status,
-              }}
-              onBack={() => {}}
+        {/* Desktop Sidebar */}
+        <aside className="hidden sm:flex w-80 lg:w-96 flex-col border-r border-gray-200 bg-white">
+          <div className="px-4 py-3 border-b border-gray-200">
+            <h2 className="font-semibold">Conversations</h2>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <ConversationList
+              conversations={rooms.map((r) => ({
+                id: r.id,
+                name: shortName(r.title),
+                avatar: "",
+                lastMessage: r.lastMessage || "",
+                time: new Date(r.updatedAtISO || r.updatedAt || Date.now()).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                }),
+                unreadCount: 0,
+                isOnline: !r.isClosed,
+                isPinned: false,
+                typing: !!typingByRoom[r.id] && Object.keys(typingByRoom[r.id]).length > 0,
+              }))}
+              activeConversationId={activeRoomId}
+              onConversationSelect={(id) => setActiveRoomId(id)}
+              loading={false}
+              error={""}
             />
           </div>
+        </aside>
 
+        {/* Chat Area */}
+        <section className="relative flex-1 flex flex-col overflow-hidden bg-gray-50">
+          {/* Non-scrolling background */}
+          <div className="absolute inset-0 z-0 pointer-events-none">
+            <ChatBackground variant="client" />
+          </div>
+
+          {/* Chat Header */}
+          <div className="relative z-10">
+            <div className="relative">
+              <ChatHeader
+                roomId={activeRoomId}
+                contact={headerData}
+                onBack={() => setShowSidebar(true)}
+                onSearchToggle={() => setShowSearch((v) => !v)}
+                activeUsers={participantsForHeader}
+                totalUsers={totalUsers || undefined}
+                onPresenceToggle={() => setPresenceOpen((v) => !v)}
+                participants={participantsForHeader}
+              />
+
+              {presenceOpen && (
+                <div className="absolute right-4 top-[calc(100%+8px)] z-40 w-80 rounded-xl border border-gray-200 bg-white shadow-xl">
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
+                    <div className="text-sm font-semibold">Room participants</div>
+                    <button
+                      onClick={() => setPresenceOpen(false)}
+                      className="px-2 py-1 rounded-lg hover:bg-gray-100"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className="p-3 space-y-4 text-sm">
+                    <div>
+                      <div className="text-xs font-semibold text-green-700">Online (active here)</div>
+                      {onlineList.length ? (
+                        <ul className="mt-1 space-y-1">
+                          {onlineList.map((u) => (
+                            <li key={`on-${u.id || u.role}`} className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-green-500" />
+                              <span className="font-medium">{u.name}</span>
+                              <span className="text-xs text-gray-500">— {u.role}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <div className="mt-1 text-xs text-gray-500">No one active</div>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="text-xs font-semibold text-amber-700">Away (online, not in this room)</div>
+                      {awayList.length ? (
+                        <ul className="mt-1 space-y-1">
+                          {awayList.map((u) => (
+                            <li key={`aw-${u.id || u.role}`} className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-amber-500" />
+                              <span className="font-medium">{u.name}</span>
+                              <span className="text-xs text-gray-500">— {u.role}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <div className="mt-1 text-xs text-gray-500">No one away</div>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="text-xs font-semibold text-gray-700">Offline</div>
+                      {offlineList.length ? (
+                        <ul className="mt-1 space-y-1">
+                          {offlineList.map((u) => (
+                            <li key={`off-${u.id || u.role}`} className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-gray-300" />
+                              <span className="font-medium">{u.name}</span>
+                              <span className="text-xs text-gray-500">— {u.role}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <div className="mt-1 text-xs text-gray-500">No one offline</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Search Bar */}
+          {showSearch && (
+            <div className="px-4 pt-2 z-10 animate-slide-down">
+              <SearchBar
+                messages={messages}
+                onClose={() => setShowSearch(false)}
+                onResultSelect={handleSearchResultSelect}
+              />
+            </div>
+          )}
+
+          {/* Inline Notifications */}
+          {notifications.length > 0 && (
+            <div className="px-4 pt-3 space-y-2 z-10">
+              {notifications.map((notif) => (
+                <InlineNotification
+                  key={notif.id}
+                  notification={notif}
+                  onDismiss={(id) =>
+                    setNotifications((prev) => prev.filter((n) => n.id !== id))
+                  }
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Room Status Banner */}
           {active?.isClosed && (
-            <div className="sticky top-[48px] md:top-[56px] z-20 bg-white/95 border-b border-black/10 px-3 md:px-4 py-2 flex items-center justify-between gap-2">
-              <div className="text-sm text-black/60">This room is closed.</div>
+            <div className="z-10 border-b px-4 py-3 flex items-center justify-between gap-2 bg-gray-100 border-gray-200">
+              <div className="text-sm text-gray-700">This room is closed.</div>
               {!reopenRequested ? (
                 <button
                   onClick={handleRequestReopen}
-                  className="rounded-full px-4 py-2 text-sm font-semibold text-white bg-black hover:bg-black/90"
+                  className="px-4 py-2 text-sm font-medium rounded-lg transition text-white bg-black hover:bg-gray-800"
                 >
                   Request to Reopen
                 </button>
               ) : (
-                <span className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1">
+                <span className="text-sm rounded-lg px-3 py-1.5 border text-green-700 bg-green-50 border-green-200">
                   Request sent
                 </span>
               )}
             </div>
           )}
 
-          <div ref={scrollerRef} className="flex-1 overflow-y-auto p-3 md:p-4 lg:p-6 bg-white">
+          {/* Messages Area */}
+          <div
+            ref={scrollerRef}
+            className="flex-1 overflow-y-auto px-4 py-4 relative z-10"
+            onContextMenu={handleContextMenu}
+          >
             {activeRoomId && active?.hasRoom ? (
-              messages.map((m) =>
-                m.inlineNotice ? <InlineNotice key={m._id} text={m.noticeText} /> : <MessageBubble key={m._id} message={m} />
-              )
+              groupMessagesByDate(messages).map((group, idx) => (
+                <div key={idx} className="mb-6">
+                  {/* Date Separator */}
+                  <div className="flex items-center justify-center mb-4">
+                    <div className="border shadow-sm rounded-full px-4 py-1.5 text-xs font-medium bg-white border-gray-200 text-gray-600">
+                      {group.date}
+                    </div>
+                  </div>
+
+                  {/* Messages */}
+                  <div className="space-y-1">
+                    {group.messages.map((m) =>
+                      m.inlineNotice ? (
+                        <InlineNotice key={m._id} text={m.noticeText} />
+                      ) : (
+                        <div key={m._id} ref={(el) => (messageRefs.current[m._id] = el)}>
+                          <MessageBubble message={m} highlighted={highlightedMessageId === m._id} />
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              ))
             ) : (
               <div className="h-full w-full grid place-items-center text-black/60">
                 Waiting for a PM to join — we’ll connect you automatically.
@@ -830,30 +1492,43 @@ export default function ClientChat() {
             )}
           </div>
 
-          <div className="sticky bottom-0 border-t border-black/10 bg-white">
-            <div className="max-w-6xl mx-auto px-3 md:px-4 py-2">
-              <ChatInput
-                onSendMessage={onSend}
-                onTypingChange={onTypingChange}
-                typingText=""
-                disabled={Boolean(active?.isClosed)}
-              />
-              <div className="mt-1 h-6">
-                {typingText && header.status !== "Closed" && (
-                  <div className="inline-flex items-center gap-2 rounded-full border border-black/15 bg-white px-3 py-1 text-xs text-black/70">
-                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-black/60" />
-                    {typingText}
-                  </div>
-                )}
+          {/* Typing Indicator */}
+          {typingText && header.status !== "Closed" && (
+            <div className="px-4 pb-2 z-10">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs bg-white border-gray-200 text-gray-600">
+                <span className="flex gap-1">
+                  <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                </span>
+                {typingText}
               </div>
             </div>
+          )}
+
+          {/* Composer */}
+          <div className="border-t px-3 md:px-4 py-2 bg-white border-gray-200 z-10">
+            <ChatInput
+              onSendMessage={onSend}
+              onTypingChange={onTypingChange}
+              typingText=""
+              disabled={Boolean(active?.isClosed)}
+            />
+            <div className="mt-1 h-6" />
           </div>
+
+          {/* Unread Messages CTA */}
+          {unreadCount > 0 && !isAtBottom && (
+            <UnreadMessagesIndicator count={unreadCount} onClick={scrollToBottom} />
+          )}
         </section>
       </div>
 
+      {/* Rating modal (new) */}
       {ratingOpen && requestIdForRating && (
-        <RatingSheet
+        <RatingModal
           requestId={requestIdForRating}
+          roomId={activeRoomId} // lets the modal validate status=Review & not already rated
           onClose={() => setRatingOpen(false)}
           onRated={() => {
             setHasRated(true);
@@ -863,6 +1538,7 @@ export default function ClientChat() {
         />
       )}
 
+      {/* Tiny toast */}
       {toast && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[70]">
           <div className="rounded-xl border border-black/10 bg-white px-4 py-2 shadow">
@@ -870,10 +1546,20 @@ export default function ClientChat() {
           </div>
         </div>
       )}
+
+      {/* Viewport-bounded context menu (portal) */}
+      <ContextMenu
+        open={menuOpen}
+        x={menuPos.x}
+        y={menuPos.y}
+        items={contextMenuItems}
+        onClose={() => setMenuOpen(false)}
+      />
     </div>
   );
 }
 
+/* --------------------------- socket ready helper --------------------------- */
 async function waitForSocketConnected(s, timeout = 4000) {
   return new Promise((resolve, reject) => {
     if (!s) return reject(new Error("No socket"));

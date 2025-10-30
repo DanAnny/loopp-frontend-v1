@@ -222,12 +222,13 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
   const onMarkAll = async () => {
     try {
       await markAllNotificationsRead();
-      setItems((prev) => prev.map((x) => ({ ...x, readAt: x.readAt || new Date().toISOString() })));
-      setUnreadCount(0);
     } catch {}
+    setItems((prev) => prev.map((x) => ({ ...x, readAt: x.readAt || new Date().toISOString() })));
+    setUnreadCount(0);
   };
 
   const bellShouldWiggle = unreadCount > 0 && !notificationOpen;
+  const chatShouldWiggle = unreadMsgs > 0; // same behavior as bell (wiggle when unread)
 
   return (
     <header className={`fixed top-0 right-0 left-0 h-16 z-30 border-b ${topbarSurface}`}>
@@ -378,6 +379,7 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
             </div>
           )}
 
+          {/* Messages / Chat icon — now mirrors bell behavior */}
           <div className="relative">
             <Link
               to="/chat"
@@ -387,7 +389,14 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
               aria-label="Messages"
               onClick={() => setUnreadMsgs(totalChatUnread(userId))}
             >
-              <MessageSquare className="w-5 h-5" />
+              <motion.span
+                animate={chatShouldWiggle ? { rotate: [0, -12, 12, -8, 8, 0] } : { rotate: 0 }}
+                transition={chatShouldWiggle ? { repeat: Infinity, duration: 1.2, ease: "easeInOut" } : { duration: 0.2 }}
+                className="inline-flex"
+              >
+                <MessageSquare className="w-5 h-5" />
+              </motion.span>
+
               {unreadMsgs > 0 && (
                 <span
                   className={[

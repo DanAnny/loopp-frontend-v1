@@ -31,12 +31,32 @@ function attachPeopleNames(p) {
   };
 }
 
-/** pick a representative task for a request (latest updated) */
+/** pick the latest-updated task (used for status/updatedAt) */
 function pickRepresentativeTask(tasksForRequest) {
   if (!tasksForRequest || tasksForRequest.length === 0) return null;
   return tasksForRequest
     .slice()
     .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt) || new Date(b.createdAt) - new Date(a.createdAt))[0];
+}
+
+/** pick the most relevant deadline for dashboards:
+ *  nearest future deadline; otherwise latest past deadline
+ */
+function pickRelevantDeadline(tasks = []) {
+  const withDeadline = tasks.filter(t => t.deadline);
+  if (withDeadline.length === 0) return null;
+
+  const now = Date.now();
+
+  const future = withDeadline
+    .filter(t => new Date(t.deadline).getTime() >= now)
+    .sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
+
+  if (future.length) return future[0].deadline;
+
+  // else latest past deadline
+  return withDeadline
+    .sort((a, b) => new Date(b.deadline) - new Date(a.deadline))[0].deadline;
 }
 
 /* ========================================================================== */
@@ -105,11 +125,13 @@ export const listProjects = async (req, res) => {
     }
 
     const enriched = items.map((p) => {
-      const rep = pickRepresentativeTask(byReq.get(String(p._id)) || []);
+      const ts = byReq.get(String(p._id)) || [];
+      const rep = pickRepresentativeTask(ts);
+      const relDeadline = pickRelevantDeadline(ts);
       return {
         ...p,
         status: prettyStatus(p.status),
-        taskDeadline: rep?.deadline ?? null,
+        taskDeadline: relDeadline ?? null,
         taskStatus:   rep?.status   ?? null,
         taskUpdatedAt:rep?.updatedAt ?? null,
       };
@@ -132,6 +154,7 @@ export const getProjectById = async (req, res) => {
       .select("request deadline status updatedAt createdAt")
       .lean();
     const rep = pickRepresentativeTask(tasks);
+    const relDeadline = pickRelevantDeadline(tasks);
 
     // add reopen flag from room if exists
     let reopenRequested = false;
@@ -145,7 +168,7 @@ export const getProjectById = async (req, res) => {
       project: {
         ...item,
         status: prettyStatus(item.status),
-        taskDeadline: rep?.deadline ?? null,
+        taskDeadline: relDeadline ?? null,
         taskStatus: rep?.status ?? null,
         taskUpdatedAt: rep?.updatedAt ?? null,
         reopenRequested, // ✅
@@ -316,10 +339,12 @@ export const listProjectsNamed = async (req, res) => {
     const roomFlagMap = new Map(rooms.map(r => [String(r.request), !!r.reopenRequestedByClient]));
 
     const withPeople = items.map(attachPeopleNames).map(p => {
-      const rep = pickRepresentativeTask(byReq.get(String(p._id)) || []);
+      const ts = byReq.get(String(p._id)) || [];
+      const rep = pickRepresentativeTask(ts);
+      const relDeadline = pickRelevantDeadline(ts);
       return {
         ...p,
-        taskDeadline: rep?.deadline ?? null,
+        taskDeadline: relDeadline ?? null,
         taskStatus: rep?.status ?? null,
         taskUpdatedAt: rep?.updatedAt ?? null,
         reopenRequested: roomFlagMap.get(String(p._id)) || false,
@@ -346,7 +371,9 @@ export const getProjectByIdNamed = async (req, res) => {
     const tasks = await Task.find({ request: item._id })
       .select("request deadline status updatedAt createdAt")
       .lean();
+
     const rep = pickRepresentativeTask(tasks);
+    const relDeadline = pickRelevantDeadline(tasks);
 
     // reopen flag
     let reopenRequested = false;
@@ -359,7 +386,7 @@ export const getProjectByIdNamed = async (req, res) => {
       success: true,
       project: {
         ...attachPeopleNames(item),
-        taskDeadline: rep?.deadline ?? null,
+        taskDeadline: relDeadline ?? null,
         taskStatus: rep?.status ?? null,
         taskUpdatedAt: rep?.updatedAt ?? null,
         reopenRequested,
@@ -386,6 +413,7 @@ export const getProjectByRoomNamed = async (req, res) => {
       .select("request deadline status updatedAt createdAt")
       .lean();
     const rep = pickRepresentativeTask(tasks);
+    const relDeadline = pickRelevantDeadline(tasks);
 
     const room = await ChatRoom.findById(roomId).lean();
 
@@ -393,7 +421,7 @@ export const getProjectByRoomNamed = async (req, res) => {
       success: true,
       project: {
         ...attachPeopleNames(pr),
-        taskDeadline: rep?.deadline ?? null,
+        taskDeadline: relDeadline ?? null,
         taskStatus: rep?.status ?? null,
         taskUpdatedAt: rep?.updatedAt ?? null,
         reopenRequested: !!room?.reopenRequestedByClient, // ✅
@@ -573,6 +601,7 @@ export const getProjectByRoom = async (req, res) => {
       .select("request deadline status updatedAt createdAt")
       .lean();
     const rep = pickRepresentativeTask(tasks);
+    const relDeadline = pickRelevantDeadline(tasks);
 
     const room = await ChatRoom.findById(roomId).lean();
 
@@ -581,7 +610,7 @@ export const getProjectByRoom = async (req, res) => {
       project: {
         ...pr,
         status: prettyStatus(pr.status),
-        taskDeadline: rep?.deadline ?? null,
+        taskDeadline: relDeadline ?? null,
         taskStatus: rep?.status ?? null,
         taskUpdatedAt: rep?.updatedAt ?? null,
         reopenRequested: !!room?.reopenRequestedByClient, // ✅

@@ -22,19 +22,62 @@ import * as Users from "@/services/users.service";
 import CreateTaskModal from "@/features/tasks/components/CreateTaskModal"; // ⬅️ added
 
 /* -------------------------------- helpers -------------------------------- */
+// keep 'by' as-is
 const by = (k) => (a, b) => {
   const av = a?.[k], bv = b?.[k];
   return new Date(bv || 0) - new Date(av || 0);
 };
-const fmtDate = (d) => (d ? new Date(d).toLocaleDateString() : "—");
 
+/** Accepts 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:mm...' and returns 'YYYY-MM-DD' or '' */
+const parseISODateOnly = (value) => {
+  if (!value || typeof value !== "string") return "";
+  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return "";
+  const y = +m[1], mo = +m[2] - 1, d = +m[3];
+  const dt = new Date(Date.UTC(y, mo, d));
+  return Number.isFinite(dt.getTime()) ? `${m[1]}-${m[2]}-${m[3]}` : "";
+};
+
+/** Format a YYYY-MM-DD safely for UI */
+const fmtISODate = (iso) => {
+  if (!iso) return "—";
+  // render as locale date, but build from components to avoid TZ shifts
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  if (!Number.isFinite(dt.getTime())) return "—";
+  return dt.toLocaleDateString(); // or add options if you want a specific style
+};
+
+/** Compute days left from a YYYY-MM-DD string */
+const daysLeftFromISO = (iso) => {
+  if (!iso) return null;
+  const [y, m, d] = iso.split("-").map(Number);
+  if (![y, m, d].every(Number.isFinite)) return null;
+  const end = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+  const diff = end - Date.now();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+};
+
+/** Pick the operative deadline for a row:
+ *  1) PM-set deadline from backend: p.taskDeadline
+ *  2) Fallback: parse ISO-ish date out of the client's completionDate string
+ */
+const pickDeadlineISO = (p) =>
+  parseISODateOnly(p?.taskDeadline) || parseISODateOnly(p?.completionDate);
+
+/** Use this for the "Due soon" highlight */
+const closeToDeadlineISO = (iso, withinDays = 5) => {
+  const d = daysLeftFromISO(iso);
+  return d != null && d <= withinDays && d >= 0;
+};
+
+// keep status helpers as-is
 const normStatus = (s = "") => {
   const t = s.toString().toLowerCase();
   if (t.includes("progress")) return "In-Progress";
   if (t.includes("complete")) return "Complete";
   return "Pending";
 };
-
 const statusBadge = (s) => {
   const st = normStatus(s);
   if (st === "Pending") return "bg-yellow-500 text-white";
@@ -275,8 +318,11 @@ export default function Projects() {
                         (p.engineerAssigned && engMap[String(p.engineerAssigned)]) ||
                         (p.engineerAssigned ? "Unknown engineer" : "Unassigned");
                       const st = normStatus(p.status);
-                      const dleft = daysLeft(p.completionDate);
-                      const dlSoon = closeToDeadline(p.completionDate, 5);
+
+                      // 👇 use PM deadline first, fallback to parsed client date
+                      const deadlineISO = pickDeadlineISO(p);
+                      const dleft = daysLeftFromISO(deadlineISO);
+                      const dlSoon = closeToDeadlineISO(deadlineISO, 5);
 
                       return (
                         <tr key={p._id} className="border-b last:border-0 border-black/10 hover:bg-black/[0.02] transition-colors">
@@ -321,7 +367,7 @@ export default function Projects() {
                             <div className="inline-flex items-center gap-2">
                               <Calendar className="w-4 h-4 text-muted-foreground" />
                               <span className={`truncate ${dlSoon ? "font-semibold" : ""}`}>
-                                {fmtDate(p.completionDate)}
+                                {fmtISODate(deadlineISO)}
                               </span>
                             </div>
                             {typeof dleft === "number" && (
@@ -335,7 +381,8 @@ export default function Projects() {
                           <Td>
                             <div className="inline-flex items-center gap-2">
                               <Clock className="w-4 h-4 text-muted-foreground" />
-                              <span className="truncate">{fmtDate(p.updatedAt || p.createdAt)}</span>
+                              {/* updatedAt/createdAt are ISO strings from Mongo; render safely */}
+                              <span className="truncate">{fmtISODate(parseISODateOnly(p.updatedAt || p.createdAt))}</span>
                             </div>
                           </Td>
 
@@ -375,8 +422,9 @@ export default function Projects() {
               (p.engineerAssigned && engMap[String(p.engineerAssigned)]) ||
               (p.engineerAssigned ? "Unknown engineer" : "Unassigned");
             const status = normStatus(p.status);
-            const dlSoon = closeToDeadline(p.completionDate, 5);
-            const dleft = daysLeft(p.completionDate);
+            const deadlineISO = pickDeadlineISO(p);
+            const dlSoon = closeToDeadlineISO(deadlineISO, 5);
+            const dleft = daysLeftFromISO(deadlineISO);
 
             return (
               <div key={p._id} className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm">
@@ -396,12 +444,22 @@ export default function Projects() {
                 <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
                   <Info label="Client" value={`${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || "—"} />
                   <Info label="Engineer" value={engName} />
-                  <Info label="Deadline" value={
-                    <span className={dlSoon ? "font-semibold" : ""}>
-                      {fmtDate(p.completionDate)}{typeof dleft === "number" ? ` · ${dleft < 0 ? `${Math.abs(dleft)}d overdue` : `${dleft}d left`}` : ""}
-                    </span>
-                  } />
-                  <Info label="Updated" value={fmtDate(p.updatedAt || p.createdAt)} />
+                  <Info
+                    label="Deadline"
+                    value={
+                      <span className={dlSoon ? "font-semibold" : ""}>
+                        {fmtISODate(deadlineISO)}
+                        {typeof dleft === "number"
+                          ? ` · ${dleft < 0 ? `${Math.abs(dleft)}d overdue` : `${dleft}d left`}`
+                          : ""}
+                      </span>
+                    }
+                  />
+
+                  <Info
+                    label="Updated"
+                    value={fmtISODate(parseISODateOnly(p.updatedAt || p.createdAt))}
+                  />
                 </div>
 
                 <div className="mt-3 flex justify-end">

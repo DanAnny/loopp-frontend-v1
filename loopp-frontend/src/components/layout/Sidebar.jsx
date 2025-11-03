@@ -46,8 +46,7 @@ export default function Sidebar({ isOpen, setIsOpen }) {
         { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
         { icon: Users, label: 'View Staffs', path: '/staffs' },
         { icon: UserPlus, label: 'Add Staff', path: '/staffs/new' },
-        { icon: FileText, label: 'Management', path: '/management' }, // placeholder hub
-        { icon: Settings, label: 'Settings', path: '/settings', comingSoon: true },
+        { icon: FileText, label: 'Management', path: '/management' }, 
       ];
     }
 
@@ -56,7 +55,6 @@ export default function Sidebar({ isOpen, setIsOpen }) {
         commonHome,
         { icon: Users, label: 'View Staffs', path: '/staffs' },
         { icon: UserPlus, label: 'Add Staff', path: '/staffs/new' },
-        { icon: FileText, label: 'Documents', path: '/documents' },
         { icon: BarChart3, label: 'Analytics', path: '/analytics' },
       ];
     }
@@ -64,7 +62,7 @@ export default function Sidebar({ isOpen, setIsOpen }) {
     if (role === ROLES.PM) {
       return [
         commonHome,
-        { icon: ClipboardList, label: 'Project Requests', path: '/project-requests' },
+        // { icon: ClipboardList, label: 'Project Requests', path: '/project-requests' },
         { icon: MessageSquare, label: 'Chat', path: '/chat' },
       ];
     }

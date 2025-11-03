@@ -1,21 +1,23 @@
 // src/pages/SuperAdminDashboardFull.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { motion } from "framer-motion";
 import {
   AreaChart, Area, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, Legend, ComposedChart, Line, PieChart, Pie, Cell, RadarChart, PolarGrid,
+  ResponsiveContainer, Legend, ComposedChart, Line, RadarChart, PolarGrid,
   PolarAngleAxis, PolarRadiusAxis, Radar
 } from "recharts";
 import {
-  RefreshCcw, Filter, Users, Briefcase, ClipboardList, CheckCircle2, UserCheck, UserCog,
-  Zap, Shield, Clock, Activity as ActivityIcon, Star, TrendingUp, Target, Layers
+  RefreshCw, Filter, Users, Briefcase, ClipboardList, CheckCircle2, UserCheck, UserCog,
+  Zap, Shield, Clock, Activity as ActivityIcon, Star, TrendingUp, Layers,
+  Download, AlertTriangle, ArrowUpRight, ArrowDownRight
 } from "lucide-react";
 import dashboard from "@/services/dashboard.service";
 
-/** Full SuperAdmin Dashboard — “Command Center” */
+/** Full SuperAdmin Dashboard — "Command Center" (UI upgrade only) */
 export default function SuperAdminDashboardFull() {
   const [loading, setLoading] = useState(true);
-  const [range, setRange] = useState("month");         // month | quarter
+  const [range, setRange] = useState("month");         // month | quarter | year | week
   const [granularity, setGranularity] = useState("day"); // day | week
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
@@ -39,166 +41,175 @@ export default function SuperAdminDashboardFull() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range, granularity]);
 
-  // Unpack (with safe defaults)
-  const totals = data?.totals || {};
-  const lineSeries = data?.charts?.lineSeries || [];     // [{ date, requested, assigned, accepted, completed }]
-  const roleBars = data?.charts?.roleBars || [];         // [{ role, active, idle, total }]
-  const funnel = data?.charts?.funnel || buildFunnel(lineSeries);
-  const sla = data?.sla || { onTimeRate: null, overdueRate: null, avgCycleDays: null };
-  const ratings = data?.ratings || {};
-  const ratingDist = ratings?.distribution || [];        // [{ stars: 5, count: 12 }, ...]
-  const leaders = ratings?.leaders || { pm: [], engineer: [] }; // [{ id, name, avg, count }]
-  const activity = data?.activity || [];                 // [{ id, time, text, actor }]
-  const clients = data?.clients || [];                   // [{ name, projects, growth }]
-  const pmActivity = data?.pmActivity || [];             // for radar [{ metric, value }]
-  const projects = data?.projects || [];                 // compact table
+  // ---------- Unpack with safe defaults ----------
+  const totals     = data?.totals || {};
+  const lineSeries = data?.charts?.lineSeries || [];         // [{ date, requested, assigned, accepted, completed }]
+  const roleBars   = data?.charts?.roleBars || [];           // [{ role, active, idle, total }]
+  const funnel     = data?.charts?.funnel || buildFunnel(lineSeries);
+
+  const sla        = data?.sla || { onTimeRate: null, overdueRate: null, avgCycleDays: null };
+
+  const ratings    = data?.ratings || {};
+  const ratingDist = ratings?.distribution || [];            // [{ stars, count }]
+  const leaders    = ratings?.leaders || { pm: [], engineer: [] };
+
+  const pmActivity = data?.pmActivity || defaultRadar();     // [{ metric, value }]
+  const activity   = data?.activity || [];
+  const clients    = data?.clients || [];
+  const projects   = data?.projects || [];
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#0B0B0E] via-[#0D0D12] to-[#0B0B0E] text-white">
-      {/* Ambient glow + grid */}
+    <main className="min-h-screen bg-[#0f1729] px-6 py-8 text-white">
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(1200px_600px_at_10%_-20%,rgba(93,95,239,.15),transparent),radial-gradient(1000px_600px_at_90%_0%,rgba(236,72,153,.12),transparent)]" />
-      <div className="pointer-events-none fixed inset-0 -z-10 grid-overlay-dark opacity-[.08]" />
-
-      <div className="mx-auto max-w-[1400px] px-4 sm:px-6 py-8">
+      <div className="max-w-[1600px] mx-auto">
         {/* Header */}
-        <header className="mb-6 sm:mb-8">
-          <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl shadow-[0_20px_60px_rgba(0,0,0,.35)]">
-            <div className="absolute inset-0 bg-[radial-gradient(850px_380px_at_8%_0%,rgba(93,95,239,.18),transparent)]" />
-            <div className="absolute inset-0 bg-[radial-gradient(850px_380px_at_92%_0%,rgba(236,72,153,.14),transparent)]" />
-            <div className="relative flex flex-col gap-4 p-5 sm:p-6 md:flex-row md:items-end md:justify-between">
-              <div>
-                <h1 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight">
-                  SuperAdmin Command Center
-                </h1>
-                <p className="mt-1 text-sm text-white/70">
-                  End-to-end visibility across pipeline, staff, SLA & satisfaction
-                </p>
+        <motion.header
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-col lg:flex-row lg:items-center justify-between mb-8 gap-4"
+        >
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                <Shield className="w-6 h-6 text-white" />
               </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/30 px-3 py-2">
-                  <Filter className="h-4 w-4 opacity-80" />
-                  <label className="text-xs text-white/60">Range</label>
-                  <select
-                    value={range}
-                    onChange={(e) => setRange(e.target.value)}
-                    className="bg-transparent text-sm outline-none"
-                  >
-                    <option value="month">This Month</option>
-                    <option value="quarter">This Quarter</option>
-                  </select>
-                  <div className="mx-1 h-4 w-px bg-white/10" />
-                  <label className="text-xs text-white/60">Granularity</label>
-                  <select
-                    value={granularity}
-                    onChange={(e) => setGranularity(e.target.value)}
-                    className="bg-transparent text-sm outline-none"
-                  >
-                    <option value="day">Daily</option>
-                    <option value="week">Weekly</option>
-                  </select>
-                </div>
-
-                <button
-                  onClick={load}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-sm transition hover:bg-white/20 active:scale-[.98]"
-                >
-                  <RefreshCcw className="h-4 w-4" />
-                  Refresh
-                </button>
-
-                <nav className="hidden md:flex items-center gap-2">
-                  <NavLink to="/sa/add-admin">Add Admin</NavLink>
-                  <NavLink to="/sa/staff">Manage Staff</NavLink>
-                  <NavLink to="/sa/rejections">Rejections</NavLink>
-                </nav>
-              </div>
+              <h1 className="text-3xl">SuperAdmin Command Center</h1>
             </div>
+            <p className="text-slate-300/80 text-sm flex items-center gap-2">
+              <Clock className="w-4 h-4" />
+              End-to-end visibility across pipeline, staff, SLA & satisfaction
+            </p>
           </div>
-        </header>
+
+          <div className="flex items-center gap-3 flex-wrap">
+            <select
+              value={range}
+              onChange={(e) => setRange(e.target.value)}
+              className="bg-[#131b2a] text-white px-4 py-2.5 rounded-lg text-sm outline-none border border-slate-700/50 cursor-pointer hover:bg-[#172033] transition-colors"
+            >
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="quarter">This Quarter</option>
+              <option value="year">This Year</option>
+            </select>
+
+            <select
+              value={granularity}
+              onChange={(e) => setGranularity(e.target.value)}
+              className="bg-[#131b2a] text-white px-4 py-2.5 rounded-lg text-sm outline-none border border-slate-700/50 cursor-pointer hover:bg-[#172033] transition-colors"
+            >
+              <option value="day">Daily</option>
+              <option value="week">Weekly</option>
+            </select>
+
+            <button className="bg-[#131b2a] text-white px-4 py-2.5 rounded-lg text-sm border border-slate-700/50 hover:bg-[#172033] transition-colors inline-flex items-center gap-2">
+              <Filter className="w-4 h-4" />
+              <span className="hidden sm:inline">Filter</span>
+            </button>
+
+            <button className="bg-[#131b2a] text-white px-4 py-2.5 rounded-lg text-sm border border-slate-700/50 hover:bg-[#172033] transition-colors inline-flex items-center gap-2">
+              <Download className="w-4 h-4" />
+              <span className="hidden sm:inline">Export</span>
+            </button>
+
+            <motion.button
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
+              onClick={load}
+              disabled={loading}
+              className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-2.5 rounded-lg text-sm hover:from-purple-500 hover:to-pink-500 transition-all disabled:opacity-50 inline-flex items-center gap-2 font-medium"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </motion.button>
+          </div>
+        </motion.header>
 
         {/* Error */}
         {err && (
-          <div className="mb-6 rounded-2xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-rose-200">
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-200 text-sm flex items-center gap-2"
+          >
+            <AlertTriangle className="w-4 h-4" />
             {err}
-          </div>
+          </motion.div>
         )}
 
-        {/* KPI Row */}
-        <section className="grid grid-cols-1 gap-4 sm:gap-6 md:grid-cols-2 xl:grid-cols-4">
-          {loading ? (
-            Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
-          ) : (
-            <>
-              <KpiCard
-                icon={<ClipboardList className="h-5 w-5" />}
-                label="Total Project Requests"
-                value={fmt(totals.totalRequests)}
-                hint="All time pipeline intake"
-                accent="from-indigo-500/40 to-blue-500/30"
-              />
-              <KpiCard
-                icon={<Briefcase className="h-5 w-5" />}
-                label="Assigned (Range)"
-                value={fmt(totals.assignedThisRange)}
-                hint="Engineer assigned"
-                accent="from-violet-500/40 to-fuchsia-500/30"
-              />
-              <KpiCard
-                icon={<UserCheck className="h-5 w-5" />}
-                label="Accepted by Engineers"
-                value={fmt(totals.acceptedThisRange)}
-                hint="Moved to In-Progress"
-                accent="from-emerald-500/40 to-lime-500/30"
-              />
-              <KpiCard
-                icon={<CheckCircle2 className="h-5 w-5" />}
-                label="Completed (Range)"
-                value={fmt(totals.completedThisRange)}
-                hint="Marked Complete"
-                accent="from-amber-500/40 to-orange-500/30"
-              />
-            </>
-          )}
-        </section>
+        {/* KPI Row (percentages removed) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+          <StatCard
+            label="Total Requests"
+            value={fmt(totals.totalRequests)}
+            subtitle="All time pipeline"
+            icon={<ClipboardList className="w-5 h-5" />}
+            iconBg="bg-gradient-to-br from-indigo-500 to-blue-600"
+            delay={0.05}
+            loading={loading}
+          />
+          <StatCard
+            label="Assigned"
+            value={fmt(totals.assignedThisRange)}
+            subtitle="This period"
+            icon={<Briefcase className="w-5 h-5" />}
+            iconBg="bg-gradient-to-br from-violet-500 to-fuchsia-600"
+            delay={0.1}
+            loading={loading}
+          />
+          <StatCard
+            label="Accepted"
+            value={fmt(totals.acceptedThisRange)}
+            subtitle="In progress"
+            icon={<UserCheck className="w-5 h-5" />}
+            iconBg="bg-gradient-to-br from-emerald-500 to-lime-600"
+            delay={0.15}
+            loading={loading}
+          />
+          <StatCard
+            label="Completed"
+            value={fmt(totals.completedThisRange)}
+            subtitle="This period"
+            icon={<CheckCircle2 className="w-5 h-5" />}
+            iconBg="bg-gradient-to-br from-amber-500 to-orange-600"
+            delay={0.2}
+            loading={loading}
+          />
+        </div>
 
-        {/* Staffing KPIs */}
-        <section className="mt-6 grid grid-cols-1 gap-4 sm:gap-6 md:grid-cols-3">
-          {loading ? (
-            <>
-              <SkeletonCard />
-              <SkeletonCard />
-              <SkeletonCard />
-            </>
-          ) : (
-            <>
-              <KpiCard
-                icon={<Users className="h-5 w-5" />}
-                label="Staff (Total)"
-                value={fmt(totals?.staff?.total)}
-                hint="All roles"
-                accent="from-sky-500/40 to-cyan-500/30"
-              />
-              <KpiCard
-                icon={<UserCog className="h-5 w-5" />}
-                label="PM / Engineer / Admin"
-                value={`${fmt(totals?.staff?.pm)} / ${fmt(totals?.staff?.engineer)} / ${fmt(totals?.staff?.admin)}`}
-                hint="Role breakdown"
-                accent="from-fuchsia-500/40 to-pink-500/30"
-              />
-              <KpiCard
-                icon={<Zap className="h-5 w-5" />}
-                label="Active PM / Eng"
-                value={`${fmt((roleBars?.[0]?.active))} / ${fmt((roleBars?.[1]?.active))}`}
-                hint="Busy or Online"
-                accent="from-green-500/40 to-emerald-500/30"
-              />
-            </>
-          )}
-        </section>
+        {/* Staffing KPIs (percentages removed) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mb-8">
+          <StatCard
+            label="Total Staff"
+            value={fmt(totals?.staff?.total)}
+            subtitle="All roles"
+            icon={<Users className="w-5 h-5" />}
+            iconBg="bg-gradient-to-br from-sky-500 to-cyan-600"
+            delay={0.25}
+            loading={loading}
+          />
+          <StatCard
+            label="PM / Engineer / Admin"
+            value={`${fmt(totals?.staff?.pm)} / ${fmt(totals?.staff?.engineer)} / ${fmt(totals?.staff?.admin)}`}
+            subtitle="Role breakdown"
+            icon={<UserCog className="w-5 h-5" />}
+            iconBg="bg-gradient-to-br from-fuchsia-500 to-pink-600"
+            delay={0.3}
+            loading={loading}
+          />
+          <StatCard
+            label="Active PM / Eng"
+            value={`${fmt(roleBars?.[0]?.active || 0)} / ${fmt(roleBars?.[1]?.active || 0)}`}
+            subtitle="Currently working"
+            icon={<Zap className="w-5 h-5" />}
+            iconBg="bg-gradient-to-br from-green-500 to-emerald-600"
+            delay={0.35}
+            loading={loading}
+          />
+        </div>
 
         {/* Pipeline + Funnel */}
-        <section className="mt-6 grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
           <ChartCard
             title="Pipeline Velocity"
             subtitle="Requested → Assigned → Accepted → Completed"
@@ -212,11 +223,11 @@ export default function SuperAdminDashboardFull() {
                   {grad("gAcc", "#22c55e")}
                   {grad("gCom", "#f59e0b")}
                 </defs>
-                <CartesianGrid stroke="rgba(255,255,255,.08)" vertical={false} />
-                <XAxis dataKey="date" tick={{ fill: "rgba(255,255,255,.7)", fontSize: 12 }} />
-                <YAxis allowDecimals={false} tick={{ fill: "rgba(255,255,255,.7)", fontSize: 12 }} />
+                <CartesianGrid stroke="rgba(148,163,184,0.1)" vertical={false} />
+                <XAxis dataKey="date" tick={{ fill: "rgba(226,232,240,0.85)", fontSize: 12 }} stroke="rgba(148,163,184,0.2)" />
+                <YAxis allowDecimals={false} tick={{ fill: "rgba(226,232,240,0.85)", fontSize: 12 }} stroke="rgba(148,163,184,0.2)" />
                 <Tooltip content={<DarkTooltip />} />
-                <Legend wrapperStyle={{ color: "rgba(255,255,255,.8)" }} />
+                <Legend wrapperStyle={{ color: "rgba(226,232,240,0.9)" }} />
                 <Area type="monotone" dataKey="requested" stroke="#7c83ff" strokeWidth={2} fill="url(#gReq)" activeDot={{ r: 4 }} />
                 <Area type="monotone" dataKey="assigned"  stroke="#d946ef" strokeWidth={2} fill="url(#gAss)" activeDot={{ r: 4 }} />
                 <Area type="monotone" dataKey="accepted"  stroke="#22c55e" strokeWidth={2} fill="url(#gAcc)" activeDot={{ r: 4 }} />
@@ -228,19 +239,19 @@ export default function SuperAdminDashboardFull() {
           <ChartCard title="Conversion Funnel" subtitle="From intake to done">
             <ResponsiveContainer width="100%" height={320}>
               <ComposedChart data={funnel}>
-                <CartesianGrid stroke="rgba(255,255,255,.08)" vertical={false} />
-                <XAxis dataKey="stage" tick={{ fill: "rgba(255,255,255,.8)" }} />
-                <YAxis allowDecimals={false} tick={{ fill: "rgba(255,255,255,.8)" }} />
+                <CartesianGrid stroke="rgba(148,163,184,0.1)" vertical={false} />
+                <XAxis dataKey="stage" tick={{ fill: "rgba(226,232,240,0.9)", fontSize: 11 }} stroke="rgba(148,163,184,0.2)" />
+                <YAxis allowDecimals={false} tick={{ fill: "rgba(226,232,240,0.85)", fontSize: 12 }} stroke="rgba(148,163,184,0.2)" />
                 <Tooltip content={<DarkTooltip />} />
                 <Bar dataKey="count" fill="#7c83ff" radius={[10, 10, 0, 0]} />
-                <Line dataKey="rate" stroke="#22c55e" strokeWidth={2} dot={{ r: 2 }} />
+                <Line dataKey="rate" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} />
               </ComposedChart>
             </ResponsiveContainer>
           </ChartCard>
-        </section>
+        </div>
 
         {/* Staff Utilization + SLA */}
-        <section className="mt-6 grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
           <ChartCard title="Staff by Role" subtitle="Active vs Idle vs Total" className="lg:col-span-2">
             <ResponsiveContainer width="100%" height={320}>
               <BarChart data={roleBars}>
@@ -249,33 +260,33 @@ export default function SuperAdminDashboardFull() {
                   {barGrad("bIdle", "#f43f5e")}
                   {barGrad("bTotal", "#38bdf8")}
                 </defs>
-                <CartesianGrid stroke="rgba(255,255,255,.08)" vertical={false} />
-                <XAxis dataKey="role" tick={{ fill: "rgba(255,255,255,.8)" }} />
-                <YAxis allowDecimals={false} tick={{ fill: "rgba(255,255,255,.8)" }} />
+                <CartesianGrid stroke="rgba(148,163,184,0.1)" vertical={false} />
+                <XAxis dataKey="role" tick={{ fill: "rgba(226,232,240,0.9)" }} stroke="rgba(148,163,184,0.2)" />
+                <YAxis allowDecimals={false} tick={{ fill: "rgba(226,232,240,0.85)" }} stroke="rgba(148,163,184,0.2)" />
                 <Tooltip content={<DarkTooltip />} />
-                <Legend wrapperStyle={{ color: "rgba(255,255,255,.8)" }} />
+                <Legend wrapperStyle={{ color: "rgba(226,232,240,0.9)" }} />
                 <Bar dataKey="active" stackId="a" fill="url(#bActive)" radius={[8, 8, 0, 0]} />
-                <Bar dataKey="idle" stackId="a" fill="url(#bIdle)" radius={[8, 8, 0, 0]} />
-                <Bar dataKey="total" fill="url(#bTotal)" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="idle"   stackId="a" fill="url(#bIdle)"   radius={[8, 8, 0, 0]} />
+                <Bar dataKey="total"  fill="url(#bTotal)"              radius={[8, 8, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
 
           <div className="grid grid-rows-3 gap-4">
-            <MeterCard icon={<Clock className="h-4 w-4" />} label="On-Time Delivery" value={sla.onTimeRate} suffix="%" />
-            <MeterCard icon={<Clock className="h-4 w-4" />} label="Overdue Share" value={sla.overdueRate} suffix="%" tone="rose" />
-            <MiniStat icon={<TrendingUp className="h-4 w-4" />} label="Avg Cycle Time" value={fmtDays(sla.avgCycleDays)} hint="Request → Complete" />
+            <MeterCard icon={<Clock className="w-4 h-4" />} label="On-Time Delivery" value={sla.onTimeRate} suffix="%" />
+            <MeterCard icon={<Clock className="w-4 h-4" />} label="Overdue Share" value={sla.overdueRate} suffix="%" tone="rose" />
+            <MiniStat  icon={<TrendingUp className="w-4 h-4" />} label="Avg Cycle Time" value={fmtDays(sla.avgCycleDays)} hint="Request → Complete" />
           </div>
-        </section>
+        </div>
 
         {/* Ratings + PM Radar */}
-        <section className="mt-6 grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
           <ChartCard title="Rating Distribution" subtitle="Customer satisfaction spread (★)">
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={ratingDist}>
-                <CartesianGrid stroke="rgba(255,255,255,.08)" vertical={false} />
-                <XAxis dataKey="stars" tick={{ fill: "rgba(255,255,255,.8)" }} />
-                <YAxis allowDecimals={false} tick={{ fill: "rgba(255,255,255,.8)" }} />
+                <CartesianGrid stroke="rgba(148,163,184,0.1)" vertical={false} />
+                <XAxis dataKey="stars" tick={{ fill: "rgba(226,232,240,0.9)" }} stroke="rgba(148,163,184,0.2)" />
+                <YAxis allowDecimals={false} tick={{ fill: "rgba(226,232,240,0.85)" }} stroke="rgba(148,163,184,0.2)" />
                 <Tooltip content={<DarkTooltip />} />
                 <Bar dataKey="count" fill="#f59e0b" radius={[8, 8, 0, 0]} />
               </BarChart>
@@ -284,9 +295,9 @@ export default function SuperAdminDashboardFull() {
 
           <ChartCard title="PM Activity Radar" subtitle="Distribution across actions">
             <ResponsiveContainer width="100%" height={300}>
-              <RadarChart data={pmActivity.length ? pmActivity : defaultRadar()}>
-                <PolarGrid stroke="rgba(255,255,255,.2)" />
-                <PolarAngleAxis dataKey="metric" tick={{ fill: "rgba(255,255,255,.85)" }} />
+              <RadarChart data={pmActivity?.length ? pmActivity : defaultRadar()}>
+                <PolarGrid stroke="rgba(148,163,184,0.3)" />
+                <PolarAngleAxis dataKey="metric" tick={{ fill: "rgba(226,232,240,0.95)", fontSize: 12 }} />
                 <PolarRadiusAxis tick={false} axisLine={false} />
                 <Radar dataKey="value" stroke="#7c83ff" fill="#7c83ff" fillOpacity={0.35} />
               </RadarChart>
@@ -294,44 +305,57 @@ export default function SuperAdminDashboardFull() {
           </ChartCard>
 
           <ChartCard title="Top Leaders" subtitle="Best rated PMs & Engineers">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4">
               <LeaderList title="PM" items={leaders.pm || []} />
               <LeaderList title="Engineer" items={leaders.engineer || []} />
             </div>
           </ChartCard>
-        </section>
+        </div>
 
         {/* Clients + Activity + Projects */}
-        <section className="mt-6 grid grid-cols-1 gap-4 sm:gap-6 xl:grid-cols-3">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
           <ChartCard title="Top Clients" subtitle="Volume & recent growth">
             <div className="space-y-2">
               {(clients || []).slice(0, 8).map((c, i) => (
-                <div key={c.name + i} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
+                <motion.div
+                  key={String(c.name) + i}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                  className="flex items-center justify-between rounded-xl border border-slate-700/50 bg-[#131b2a] px-4 py-3 hover:bg-[#172033] transition-colors"
+                >
                   <div className="min-w-0">
-                    <div className="truncate font-semibold">{c.name}</div>
-                    <div className="text-[11px] text-white/70">{fmt(c.projects)} projects</div>
+                    <div className="truncate">{c.name}</div>
+                    <div className="text-xs text-slate-300/80">{fmt(c.projects)} projects</div>
                   </div>
-                  <span className={`text-xs ${Number(c.growth) >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
-                    {Number(c.growth) >= 0 ? "▲" : "▼"} {Math.abs(Number(c.growth) || 0)}%
+                  <span className={`text-xs font-medium ${Number(c.growth) >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                    {Number(c.growth) >= 0 ? <ArrowUpRight className="inline w-4 h-4 mr-1" /> : <ArrowDownRight className="inline w-4 h-4 mr-1" />}
+                    {Math.abs(Number(c.growth) || 0)}%
                   </span>
-                </div>
+                </motion.div>
               ))}
               {!clients?.length && <EmptyNote>We’ll list your top clients here.</EmptyNote>}
             </div>
           </ChartCard>
 
           <ChartCard title="Recent Activity" subtitle="Latest org events">
-            <ul className="divide-y divide-white/10">
-              {(activity || []).slice(0, 10).map((a) => (
-                <li key={a.id} className="flex items-start gap-3 py-2">
-                  <div className="grid h-8 w-8 place-items-center rounded-full border border-white/10 bg-white/10">
-                    <ActivityIcon className="h-4 w-4" />
+            <ul className="divide-y divide-slate-700/50">
+              {(activity || []).slice(0, 10).map((a, idx) => (
+                <motion.li
+                  key={a.id || idx}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.03 }}
+                  className="flex items-start gap-3 py-3"
+                >
+                  <div className="grid h-8 w-8 place-items-center rounded-full border border-slate-700/50 bg-[#131b2a]">
+                    <ActivityIcon className="h-4 w-4 text-slate-300/80" />
                   </div>
-                  <div className="min-w-0">
-                    <div className="truncate">{a.text}</div>
-                    <div className="text-[11px] text-white/70">{a.actor} • {a.time}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm">{a.text}</div>
+                    <div className="text-xs text-slate-400">{a.actor} • {a.time}</div>
                   </div>
-                </li>
+                </motion.li>
               ))}
               {!activity?.length && <EmptyNote>No activity in this range.</EmptyNote>}
             </ul>
@@ -341,29 +365,31 @@ export default function SuperAdminDashboardFull() {
             <div className="overflow-x-auto">
               <table className="min-w-full border-collapse">
                 <thead>
-                  <tr className="text-left text-[11px] sm:text-xs uppercase tracking-wide text-white/70">
-                    <th className="border-b border-white/10 px-3 py-2">Title</th>
-                    <th className="border-b border-white/10 px-3 py-2">Client</th>
-                    <th className="border-b border-white/10 px-3 py-2">PM</th>
-                    <th className="border-b border-white/10 px-3 py-2">Engineer</th>
-                    <th className="border-b border-white/10 px-3 py-2">Status</th>
+                  <tr className="text-left text-xs uppercase tracking-wide text-slate-400 border-b border-slate-700/50">
+                    <th className="px-3 py-3">Title</th>
+                    <th className="px-3 py-3">Client</th>
+                    <th className="px-3 py-3">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(projects || []).slice(0, 8).map((p) => (
-                    <tr key={p.id} className="hover:bg-white/5">
-                      <td className="border-b border-white/10 px-3 py-2 text-sm">{p.title}</td>
-                      <td className="border-b border-white/10 px-3 py-2 text-sm">{p.client}</td>
-                      <td className="border-b border-white/10 px-3 py-2 text-sm">{p.pm || "—"}</td>
-                      <td className="border-b border-white/10 px-3 py-2 text-sm">{p.engineer || "—"}</td>
-                      <td className="border-b border-white/10 px-3 py-2 text-sm">
+                  {(projects || []).slice(0, 8).map((p, idx) => (
+                    <motion.tr
+                      key={p.id || idx}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: idx * 0.05 }}
+                      className="hover:bg-[#131b2a] border-b border-slate-700/50 transition-colors"
+                    >
+                      <td className="px-3 py-3 text-sm">{p.title}</td>
+                      <td className="px-3 py-3 text-sm text-slate-300">{p.client}</td>
+                      <td className="px-3 py-3 text-sm">
                         <StatusPill status={p.status} />
                       </td>
-                    </tr>
+                    </motion.tr>
                   ))}
                   {!projects?.length && (
                     <tr>
-                      <td className="px-3 py-4 text-sm text-white/70" colSpan={5}>
+                      <td className="px-3 py-4 text-sm text-slate-400" colSpan={3}>
                         No projects to show.
                       </td>
                     </tr>
@@ -372,54 +398,81 @@ export default function SuperAdminDashboardFull() {
               </table>
             </div>
           </ChartCard>
-        </section>
+        </div>
+
+        {/* Quick Actions */}
+        <motion.div
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+          className="grid grid-cols-2 gap-4"
+        >
+          <Link to="/sa/add-admin" className="block">
+            <motion.div
+              whileHover={{ scale: 1.02, y: -2 }}
+              whileTap={{ scale: 0.98 }}
+              className="rounded-xl bg-gradient-to-br from-blue-600 to-cyan-600 p-6 text-white shadow-lg hover:shadow-xl transition-all"
+            >
+              <UserCog className="w-6 h-6 mb-3" />
+              <h3 className="text-sm mb-1">Add Admin</h3>
+              <p className="text-xs text-white/80">Create new admin user</p>
+            </motion.div>
+          </Link>
+
+          <Link to="/sa/staff" className="block">
+            <motion.div
+              whileHover={{ scale: 1.02, y: -2 }}
+              whileTap={{ scale: 0.98 }}
+              className="rounded-xl bg-gradient-to-br from-purple-600 to-pink-600 p-6 text-white shadow-lg hover:shadow-xl transition-all"
+            >
+              <Users className="w-6 h-6 mb-3" />
+              <h3 className="text-sm mb-1">Manage Staff</h3>
+              <p className="text-xs text-white/80">View all team members</p>
+            </motion.div>
+          </Link>
+        </motion.div>
       </div>
     </main>
   );
 }
 
-/* ==================== UI Bits ==================== */
-function NavLink({ to, children }) {
+/* ==================== UI Components ==================== */
+function StatCard({ label, value, subtitle, icon, iconBg, delay = 0, loading }) {
   return (
-    <Link
-      to={to}
-      className="rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-sm transition hover:bg-white/20"
+    <motion.div
+      initial={{ opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay }}
+      whileHover={{ y: -3, scale: 1.02 }}
+      className="rounded-xl bg-[#131b2a] border border-slate-700/50 p-6 hover:shadow-xl transition-all"
     >
-      {children}
-    </Link>
-  );
-}
-
-function KpiCard({ icon, label, value, hint, accent = "from-indigo-500/40 to-violet-500/30" }) {
-  return (
-    <div className="group relative overflow-hidden rounded-3xl border border-white/10 bg-white/[.06] p-5 sm:p-6 shadow-[0_10px_26px_rgba(0,0,0,.35)] backdrop-blur-xl transition-transform hover:-translate-y-0.5">
-      <div className={`pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-gradient-to-br ${accent} opacity-60 blur-2xl transition-all group-hover:scale-110`} />
-      <div className="flex items-start gap-3">
-        <div className="grid h-10 w-10 place-items-center rounded-2xl border border-white/10 bg-white/10">
+      <div className="flex items-start justify-between mb-4">
+        <div className={`p-3 rounded-xl ${iconBg} text-white shadow-lg`}>
           {icon}
         </div>
-        <div className="min-w-0">
-          <p className="truncate text-[11px] sm:text-xs uppercase tracking-wide text-white/70" title={label}>
-            {label}
-          </p>
-          <p className="mt-1 text-2xl sm:text-3xl font-black tracking-tight">{value}</p>
-          {hint && <p className="mt-1 text-[11px] text-white/60">{hint}</p>}
-        </div>
+        {/* trend badge removed */}
       </div>
-    </div>
+      {loading ? (
+        <div className="h-8 w-24 bg-slate-700/30 rounded animate-pulse mb-2" />
+      ) : (
+        <div className="text-3xl mb-2">{value}</div>
+      )}
+      <div className="text-xs uppercase tracking-[0.15em] text-slate-400 mb-1">{label}</div>
+      {subtitle && <div className="text-xs text-slate-400/80">{subtitle}</div>}
+    </motion.div>
   );
 }
 
 function ChartCard({ title, subtitle, className = "", children }) {
   return (
-    <div className={`rounded-3xl border border-white/10 bg-white/5 p-5 sm:p-6 shadow-[0_20px_60px_rgba(0,0,0,.35)] backdrop-blur-xl ${className}`}>
-      <div className="mb-3 flex items-center justify-between">
+    <div className={`rounded-xl border border-slate-700/50 bg-[#131b2a] p-6 shadow-lg ${className}`}>
+      <div className="mb-4 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
-          {subtitle && <p className="text-[11px] text-white/70">{subtitle}</p>}
+          <h3 className="text-sm tracking-tight">{title}</h3>
+          {subtitle && <p className="text-xs text-slate-300/80 mt-1">{subtitle}</p>}
         </div>
-        <div className="hidden sm:flex items-center gap-2 text-[11px] text-white/60">
-          <Layers className="h-4 w-4 opacity-70" />
+        <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400">
+          <Layers className="h-4 w-4" />
           <span>Live</span>
         </div>
       </div>
@@ -428,19 +481,15 @@ function ChartCard({ title, subtitle, className = "", children }) {
   );
 }
 
-function SkeletonCard() {
-  return <div className="h-28 animate-pulse rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl" />;
-}
-
 function DarkTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#0F1115]/95 px-3 py-2 text-[11px] text-white/90 shadow-lg backdrop-blur-md">
-      {label && <div className="mb-1 text-white/80">{label}</div>}
+    <div className="rounded-lg border border-slate-700/50 bg-[#131b2a] px-3 py-2 text-xs text-white shadow-lg">
+      {label && <div className="mb-1 text-slate-300">{label}</div>}
       {payload.map((p, i) => (
         <div key={i} className="flex items-center justify-between gap-6">
-          <span className="truncate">{p.name || p.dataKey}</span>
-          <span className="font-semibold">{fmt(p.value)}</span>
+          <span className="truncate text-slate-400">{p.name || p.dataKey}</span>
+          <span className="text-white">{fmt(p.value)}</span>
         </div>
       ))}
     </div>
@@ -451,22 +500,22 @@ function MeterCard({ icon, label, value, suffix = "", tone = "emerald" }) {
   const pct = value == null ? 0 : Math.max(0, Math.min(100, Number(value)));
   const color = tone === "rose" ? "#f43f5e" : "#22c55e";
   return (
-    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-4">
-      <div className="mb-2 flex items-center gap-2 text-white/80">
-        <div className="grid h-7 w-7 place-items-center rounded-xl border border-white/10 bg-white/10">{icon}</div>
-        <span className="text-sm font-semibold">{label}</span>
+    <div className="relative overflow-hidden rounded-xl border border-slate-700/50 bg-[#131b2a] p-4">
+      <div className="mb-2 flex items-center gap-2">
+        <div className="grid h-7 w-7 place-items-center rounded-xl border border-slate-700/50 bg-[#172033]">{icon}</div>
+        <span className="text-sm">{label}</span>
       </div>
       <div className="flex items-center gap-4">
         <div
           className="grid h-16 w-16 place-items-center rounded-full"
-          style={{ background: `conic-gradient(${color} ${pct * 3.6}deg, rgba(255,255,255,.06) 0deg)` }}
+          style={{ background: `conic-gradient(${color} ${pct * 3.6}deg, rgba(148,163,184,.1) 0deg)` }}
         >
-          <div className="grid h-12 w-12 place-items-center rounded-full bg-[#0F1115] text-sm font-bold">
+          <div className="grid h-12 w-12 place-items-center rounded-full bg-[#0f1729] text-sm">
             {value == null ? "—" : `${Number(value).toFixed(0)}${suffix}`}
           </div>
         </div>
         <div className="flex-1">
-          <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-700/30">
             <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
           </div>
         </div>
@@ -477,13 +526,13 @@ function MeterCard({ icon, label, value, suffix = "", tone = "emerald" }) {
 
 function MiniStat({ icon, label, value, hint }) {
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
-      <div className="mb-1 flex items-center gap-2 text-white/80">
-        <div className="grid h-7 w-7 place-items-center rounded-xl border border-white/10 bg-white/10">{icon}</div>
-        <div className="text-sm font-semibold">{label}</div>
+    <div className="rounded-xl border border-slate-700/50 bg-[#131b2a] p-4">
+      <div className="mb-1 flex items-center gap-2">
+        <div className="grid h-7 w-7 place-items-center rounded-xl border border-slate-700/50 bg-[#172033]">{icon}</div>
+        <div className="text-sm">{label}</div>
       </div>
-      <div className="text-xl font-black">{value}</div>
-      {hint && <div className="text-[11px] text-white/60">{hint}</div>}
+      <div className="text-xl">{value}</div>
+      {hint && <div className="text-xs text-slate-300/80 mt-1">{hint}</div>}
     </div>
   );
 }
@@ -491,18 +540,18 @@ function MiniStat({ icon, label, value, hint }) {
 function LeaderList({ title, items }) {
   return (
     <div>
-      <div className="mb-2 flex items-center gap-2">
-        <Star className="h-4 w-4 text-amber-300" />
-        <h4 className="text-sm font-semibold">{title}</h4>
+      <div className="mb-3 flex items-center gap-2">
+        <Star className="h-4 w-4 text-amber-400" />
+        <h4 className="text-sm">{title}</h4>
       </div>
       <ul className="space-y-2">
         {(items || []).slice(0, 5).map((p) => (
-          <li key={p.id} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
+          <li key={p.id} className="flex items-center justify-between rounded-xl border border-slate-700/50 bg-[#172033] px-3 py-2">
             <div className="min-w-0">
-              <div className="truncate font-semibold">{p.name}</div>
-              <div className="text-[11px] text-white/70">{p.count} ratings</div>
+              <div className="truncate text-sm">{p.name}</div>
+              <div className="text-xs text-slate-300/80">{p.count} ratings</div>
             </div>
-            <div className="text-sm font-bold">★{Number(p.avg).toFixed(2)}</div>
+            <div className="text-sm text-amber-400">★{Number(p.avg).toFixed(2)}</div>
           </li>
         ))}
         {!items?.length && <EmptyNote>No leaders yet.</EmptyNote>}
@@ -514,18 +563,18 @@ function LeaderList({ title, items }) {
 function StatusPill({ status }) {
   const s = (status || "").toLowerCase();
   const map = {
-    pending: "bg-yellow-500/15 text-yellow-200 border-yellow-500/30",
-    review: "bg-sky-500/15 text-sky-200 border-sky-500/30",
-    progress: "bg-indigo-500/15 text-indigo-200 border-indigo-500/30",
-    complete: "bg-emerald-500/15 text-emerald-200 border-emerald-500/30",
-    closed: "bg-white/10 text-white/80 border-white/20",
+    pending:  "bg-amber-500/20 text-amber-300 border-amber-500/30",
+    review:   "bg-sky-500/20 text-sky-300 border-sky-500/30",
+    progress: "bg-blue-500/20 text-blue-300 border-blue-500/30",
+    complete: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+    closed:   "bg-slate-700/30 text-slate-300 border-slate-600/30",
   };
-  const cls = map[s] || "bg-white/10 text-white/80 border-white/20";
-  return <span className={`inline-block rounded-full border px-2 py-[2px] text-[11px] ${cls}`}>{status || "—"}</span>;
+  const cls = map[s] || "bg-slate-700/30 text-slate-300 border-slate-600/30";
+  return <span className={`inline-block rounded-full border px-2 py-1 text-xs ${cls}`}>{status || "—"}</span>;
 }
 
 function EmptyNote({ children }) {
-  return <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">{children}</div>;
+  return <div className="rounded-xl border border-slate-700/50 bg-[#172033] px-3 py-4 text-sm text-slate-300/80 text-center">{children}</div>;
 }
 
 /* ==================== Helpers ==================== */
@@ -560,15 +609,15 @@ function buildFunnel(series = []) {
   if (!series.length) {
     return [
       { stage: "Requested", count: 0, rate: 100 },
-      { stage: "Assigned", count: 0, rate: 0 },
-      { stage: "Accepted", count: 0, rate: 0 },
+      { stage: "Assigned",  count: 0, rate: 0 },
+      { stage: "Accepted",  count: 0, rate: 0 },
       { stage: "Completed", count: 0, rate: 0 },
     ];
   }
   const sum = (k) => series.reduce((acc, d) => acc + (Number(d[k]) || 0), 0);
   const requested = Math.max(1, sum("requested"));
-  const assigned = sum("assigned");
-  const accepted = sum("accepted");
+  const assigned  = sum("assigned");
+  const accepted  = sum("accepted");
   const completed = sum("completed");
   return [
     { stage: "Requested", count: requested, rate: 100 },

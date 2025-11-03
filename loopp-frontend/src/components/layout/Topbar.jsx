@@ -192,12 +192,14 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
   // everyone sees bell
   const hideNotifications = false;
 
-  const topbarSurface =
-    isSuperAdmin
-      ? "bg-[#0B0B0E]/80 backdrop-blur border-white/10"
-      : "bg-white/95 backdrop-blur border-black/10 shadow-sm";
+  // ---- Unified dark theme (role-agnostic) ----
+  const shellDark = "bg-gradient-to-r from-[#0b0b0e]/90 via-[#0e1016]/90 to-[#121420]/90 backdrop-blur-xl border-white/10";
+  const textMuted = "text-white/70";
+  const textSubtle = "text-white/60";
+  const hoverSoft = "hover:bg-white/10";
+  const borderSoft = "border-white/10";
 
-  /** Role-based navigation for a notification */
+  /** Role-based navigation for a notification (logic preserved) */
   function navigateForNotification(n) {
     if (isSuperAdmin) return; // SA never routes — they just read
     if (n?.link) return navigate(n.link);
@@ -231,15 +233,13 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
   const chatShouldWiggle = unreadMsgs > 0; // same behavior as bell (wiggle when unread)
 
   return (
-    <header className={`fixed top-0 right-0 left-0 h-16 z-30 border-b ${topbarSurface}`}>
+    <header className={`fixed top-0 right-0 left-0 h-16 z-30 border-b ${shellDark}`}>
       <div className="h-full flex items-center justify-between px-4 md:px-6 gap-4">
         {/* Left cluster */}
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className={`p-2 rounded-lg transition-colors ${
-              isSuperAdmin ? "hover:bg-white/10 text-white" : "hover:bg-black/5 text-black"
-            }`}
+            className={`p-2 rounded-xl transition-colors ${hoverSoft} text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30`}
             aria-label="Toggle sidebar"
           >
             <Menu className="w-5 h-5" />
@@ -248,24 +248,13 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
           {!sidebarOpen && (
             <div className="hidden md:flex flex-1 justify-start">
               <div
-                className={[
-                  "group relative flex items-center gap-2",
-                  "w-[200px] max-w-sm ml-4",
-                  "rounded-full border px-3 py-1.5",
-                  isSuperAdmin
-                    ? "border-white/15 bg-white/5 backdrop-blur focus-within:border-white/30"
-                    : "border-black/10 bg-white focus-within:border-black/40",
-                  "transition-colors",
-                ].join(" ")}
+                className="group relative flex items-center gap-2 w-[200px] max-w-sm ml-4 rounded-full border px-3 py-1.5 border-white/15 bg-white/[0.04] backdrop-blur focus-within:border-white/30 transition-colors"
               >
-                <Search className={`w-4 h-4 flex-shrink-0 ${isSuperAdmin ? "text-white/70" : "text-black/50"}`} />
+                <Search className="w-4 h-4 flex-shrink-0 text-white/70" />
                 <input
                   type="text"
                   placeholder="Search…"
-                  className={[
-                    "w-full bg-transparent outline-none text-sm",
-                    isSuperAdmin ? "placeholder:text-white/50 text-white" : "placeholder:text-black/40 text-black",
-                  ].join(" ")}
+                  className="w-full bg-transparent outline-none text-sm placeholder:text-white/50 text-white"
                 />
               </div>
             </div>
@@ -278,9 +267,7 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
             <div className="relative" ref={notificationRef}>
               <button
                 onClick={() => setNotificationOpen(!notificationOpen)}
-                className={`relative p-2 rounded-lg transition-colors ${
-                  isSuperAdmin ? "hover:bg-white/10 text-white" : "hover:bg-black/5 text-black"
-                }`}
+                className={`relative p-2 rounded-xl transition-colors ${hoverSoft} text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30`}
                 aria-label="Notifications"
               >
                 <motion.span
@@ -292,12 +279,7 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
                 </motion.span>
                 {unreadCount > 0 && (
                   <span
-                    className={[
-                      "absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1",
-                      "rounded-full bg-red-600 text-white",
-                      "text-[10px] leading-[18px] text-center font-semibold",
-                      "shadow ring-1 ring-white/80",
-                    ].join(" ")}
+                    className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] leading-[18px] text-center font-semibold shadow ring-1 ring-white/80"
                   >
                     {unreadCount > 99 ? "99+" : unreadCount}
                   </span>
@@ -311,21 +293,13 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -10, scale: 0.98 }}
                     transition={{ duration: 0.18 }}
-                    className={`absolute right-0 mt-2 w-96 overflow-hidden rounded-xl border shadow-lg ${
-                      isSuperAdmin ? "bg-[#0F1115]/95 border-white/10 text-white" : "bg-white border-black/10 text-black"
-                    }`}
+                    className={`absolute right-0 mt-2 w-96 overflow-hidden rounded-2xl border shadow-2xl bg-[#0F1115]/95 ${borderSoft} text-white`}
                   >
-                    <div
-                      className={`px-4 py-3 flex items-center justify-between border-b ${
-                        isSuperAdmin ? "border-white/10" : "border-black/10"
-                      }`}
-                    >
+                    <div className={`px-4 py-3 flex items-center justify-between border-b ${borderSoft}`}>
                       <h3 className="text-sm font-semibold">Notifications</h3>
                       <button
                         onClick={onMarkAll}
-                        className={`inline-flex items-center gap-2 text-xs px-2 py-1 rounded-md ${
-                          isSuperAdmin ? "hover:bg-white/10" : "hover:bg-black/5"
-                        }`}
+                        className={`inline-flex items-center gap-2 text-xs px-2 py-1 rounded-md ${hoverSoft}`}
                         title="Mark all as read"
                       >
                         <CheckCheck className="w-4 h-4" /> Mark all
@@ -334,26 +308,21 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
 
                     <div className="max-h-[24rem] overflow-y-auto">
                       {items.length === 0 && !loadingNotifs && (
-                        <div className={isSuperAdmin ? "p-4 text-white/70" : "p-4 text-black/60"}>No notifications</div>
+                        <div className="p-4 text-white/70">No notifications</div>
                       )}
 
                       {items.map((n) => (
                         <button
                           key={n._id || n.id}
                           onClick={() => onClickItem(n)}
-                          className={[
-                            "w-full text-left px-4 py-3 grid gap-1 border-b",
-                            isSuperAdmin ? "border-white/10" : "border-black/10",
-                            !n.readAt ? (isSuperAdmin ? "bg-white/5" : "bg-black/[0.03]") : "",
-                            "hover:opacity-90",
-                          ].join(" ")}
+                          className={`w-full text-left px-4 py-3 grid gap-1 border-b ${borderSoft} ${!n.readAt ? "bg-white/5" : "bg-transparent"} hover:bg-white/10 transition-colors`}
                         >
                           <div className="text-sm font-medium flex items-center gap-2">
                             {!n.readAt && <span className="inline-block w-2 h-2 bg-blue-500 rounded-full" />}
                             {n.title || "Notification"}
                           </div>
-                          {n.body && <div className="text-xs opacity-70">{n.body}</div>}
-                          <div className="text-[11px] opacity-50">
+                          {n.body && <div className={`text-xs ${textMuted}`}>{n.body}</div>}
+                          <div className={`text-[11px] ${textSubtle}`}>
                             {new Date(n.createdAt || Date.now()).toLocaleString()}
                           </div>
                         </button>
@@ -363,9 +332,7 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
                         <div className="p-2">
                           <button
                             onClick={loadMore}
-                            className={`w-full text-sm px-3 py-2 rounded-lg ${
-                              isSuperAdmin ? "bg-white/10 hover:bg-white/15" : "bg-black/5 hover:bg-black/10"
-                            }`}
+                            className="w-full text-sm px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 transition-colors"
                             disabled={loadingNotifs}
                           >
                             {loadingNotifs ? "Loading…" : "Load more"}
@@ -383,9 +350,7 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
           <div className="relative">
             <Link
               to="/chat"
-              className={`relative p-2 rounded-lg transition-colors ${
-                isSuperAdmin ? "hover:bg-white/10 text-white" : "hover:bg-black/5 text-black"
-              }`}
+              className={`relative p-2 rounded-xl transition-colors ${hoverSoft} text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30`}
               aria-label="Messages"
               onClick={() => setUnreadMsgs(totalChatUnread(userId))}
             >
@@ -399,12 +364,7 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
 
               {unreadMsgs > 0 && (
                 <span
-                  className={[
-                    "absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1",
-                    "rounded-full bg-red-600 text-white",
-                    "text-[10px] leading-[18px] text-center font-semibold",
-                    "shadow ring-1 ring-white/80",
-                  ].join(" ")}
+                  className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] leading-[18px] text-center font-semibold shadow ring-1 ring-white/80"
                 >
                   {unreadMsgs > 99 ? "99+" : unreadMsgs}
                 </span>
@@ -415,32 +375,24 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
           <div className="relative" ref={profileRef}>
             <button
               onClick={() => setProfileOpen(!profileOpen)}
-              className={`flex items-center gap-2 md:gap-3 p-2 rounded-lg transition-colors ${
-                isSuperAdmin ? "hover:bg-white/10" : "hover:bg-black/5"
-              }`}
+              className={`flex items-center gap-2 md:gap-3 p-2 rounded-xl transition-colors ${hoverSoft} text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30`}
               aria-label="User profile"
             >
               <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold ${
-                  isSuperAdmin ? "bg-white/10 text-white border border-white/15" : "bg-black text-white"
-                } md:hidden`}
+                className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold bg-white/10 text-white border border-white/15 md:hidden`}
               >
                 {initials}
               </div>
 
               <div className="hidden md:flex items-center gap-2">
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold ${
-                    isSuperAdmin ? "bg-white/10 text-white border border-white/15" : "bg-black text-white"
-                  }`}
-                >
+                <div className="w-8 h-8 rounded-full flex items-center justify-center font-semibold bg-white/10 text-white border border-white/15">
                   {initials}
                 </div>
                 <div className="hidden lg:block text-left">
-                  <p className={isSuperAdmin ? "text-white leading-tight" : "text-black leading-tight"}>{name}</p>
-                  <p className={isSuperAdmin ? "text-white/70 leading-tight" : "text-black/60 leading-tight"}>{role}</p>
+                  <p className="text-white leading-tight">{name}</p>
+                  <p className="text-white/70 leading-tight">{role}</p>
                 </div>
-                <ChevronDown className={`w-4 h-4 hidden lg:block ${isSuperAdmin ? "text-white" : "text-black"}`} />
+                <ChevronDown className="w-4 h-4 hidden lg:block text-white" />
               </div>
             </button>
 
@@ -451,22 +403,16 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -10, scale: 0.98 }}
                   transition={{ duration: 0.18 }}
-                  className={`absolute right-0 mt-2 w-64 overflow-hidden rounded-xl border shadow-lg ${
-                    isSuperAdmin ? "bg-[#0F1115]/95 border-white/10 text-white" : "bg-white border-black/10 text-black"
-                  }`}
+                  className={`absolute right-0 mt-2 w-64 overflow-hidden rounded-2xl border shadow-2xl bg-[#0F1115]/95 ${borderSoft} text-white`}
                 >
-                  <div className={`p-4 border-b ${isSuperAdmin ? "border-white/10" : "border-black/10"}`}>
+                  <div className={`p-4 border-b ${borderSoft}`}>
                     <div className="flex items-center gap-3">
-                      <div
-                        className={`w-12 h-12 rounded-full flex items-center justify-center font-semibold ${
-                          isSuperAdmin ? "bg-white/10 text-white border border-white/15" : "bg-black text-white"
-                        }`}
-                      >
+                      <div className="w-12 h-12 rounded-full flex items-center justify-center font-semibold bg-white/10 text-white border border-white/15">
                         {initials}
                       </div>
                       <div>
-                        <p className={isSuperAdmin ? "text-white" : "text-black"}>{name}</p>
-                        <p className={isSuperAdmin ? "text-white/70" : "text-black/60"}>{role}</p>
+                        <p className="text-white">{name}</p>
+                        <p className="text-white/70">{role}</p>
                       </div>
                     </div>
                   </div>
@@ -474,9 +420,7 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
                   <div className="py-2">
                     <Link
                       to="/profile"
-                      className={`w-full flex items-center gap-3 px-4 py-3 transition-colors text-left ${
-                        isSuperAdmin ? "hover:bg-white/10 text-white" : "hover:bg-black/5 text-black"
-                      }`}
+                      className={`w-full flex items-center gap-3 px-4 py-3 transition-colors ${hoverSoft} text-white`}
                       onClick={() => setProfileOpen(false)}
                     >
                       <User className="w-4 h-4" />
@@ -486,9 +430,7 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
                     {isSuperAdmin && (
                       <button
                         type="button"
-                        className={`w-full flex items-center gap-3 px-4 py-3 transition-colors text-left ${
-                          isSuperAdmin ? "hover:bg-white/10 text-white/90" : "hover:bg-black/5 text-black"
-                        }`}
+                        className={`w-full flex items-center gap-3 px-4 py-3 transition-colors ${hoverSoft} text-white/90`}
                         onClick={() => setProfileOpen(false)}
                       >
                         <Settings className="w-4 h-4" />
@@ -497,15 +439,13 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
                     )}
                   </div>
 
-                  <div className={isSuperAdmin ? "border-t border-white/10" : "border-t border-black/10"}>
+                  <div className={`border-t ${borderSoft}`}>
                     <button
                       onClick={() => {
                         setProfileOpen(false);
                         setShowSignout(true);
                       }}
-                      className={`w-full flex items-center gap-3 px-4 py-3 transition-colors text-left ${
-                        isSuperAdmin ? "hover:bg-rose-500/10 text-rose-300" : "hover:bg-rose-50 text-rose-600"
-                      }`}
+                      className={`w-full flex items-center gap-3 px-4 py-3 transition-colors hover:bg-rose-500/10 text-rose-300`}
                     >
                       <LogOut className="w-4 h-4" />
                       <span>Sign Out</span>

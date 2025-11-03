@@ -1,7 +1,9 @@
 // src/pages/AddStaff.jsx
-import React, { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
+import { UserPlus, ArrowLeft, Trash2, Check, AlertCircle } from "lucide-react";
 import { addUser } from "@/services/auth.service"; // named export
 
 export default function AddStaff() {
@@ -14,16 +16,16 @@ export default function AddStaff() {
 
   // Form state
   const [firstName, setFirstName] = useState("");
-  const [lastName,  setLastName]  = useState("");
-  const [email,     setEmail]     = useState("");
-  const [phone,     setPhone]     = useState("");
-  const [gender,    setGender]    = useState("");
-  const [role,      setRole]      = useState(""); // PM | Engineer | Admin (shown only if SuperAdmin)
+  const [lastName, setLastName]   = useState("");
+  const [email, setEmail]         = useState("");
+  const [phone, setPhone]         = useState("");
+  const [gender, setGender]       = useState("");
+  const [role, setRole]           = useState(""); // PM | Engineer | Admin (shown only if SuperAdmin)
 
   // UI state
-  const [loading,   setLoading]   = useState(false);
-  const [err,       setErr]       = useState("");
-  const [ok,        setOk]        = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr]         = useState("");
+  const [ok, setOk]           = useState("");
 
   const roleOptions = useMemo(() => {
     const base = [
@@ -31,34 +33,42 @@ export default function AddStaff() {
       { value: "PM", label: "Project Manager" },
       { value: "Engineer", label: "Engineer" },
     ];
-    return isSuperAdmin
-      ? [...base, { value: "Admin", label: "Admin" }]
-      : base; // Admin cannot add Admins
+    return isSuperAdmin ? [...base, { value: "Admin", label: "Admin" }] : base; // Admin cannot add Admins
   }, [isSuperAdmin]);
 
   const reset = () => {
-    setFirstName(""); setLastName(""); setEmail("");
-    setPhone(""); setGender(""); setRole("");
+    setFirstName("");
+    setLastName("");
+    setEmail("");
+    setPhone("");
+    setGender("");
+    setRole("");
+    setErr("");
+    setOk("");
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setErr(""); setOk("");
+    setErr("");
+    setOk("");
 
     // Guard: prevent Admin from trying to submit Admin role via devtools
     if (!isSuperAdmin && role === "Admin") {
-      setErr("Only the SuperAdmin can add Admin users."); 
+      setErr("Only the SuperAdmin can add Admin users.");
       return;
     }
 
     if (!firstName.trim() || !lastName.trim()) {
-      setErr("Please enter first and last name."); return;
+      setErr("Please enter first and last name.");
+      return;
     }
     if (!email.trim()) {
-      setErr("Please enter an email address."); return;
+      setErr("Please enter an email address.");
+      return;
     }
     if (!role) {
-      setErr("Please select a role."); return;
+      setErr("Please select a role.");
+      return;
     }
 
     try {
@@ -68,101 +78,168 @@ export default function AddStaff() {
       reset();
       // Small delay so user can see success
       setTimeout(() => navigate("/staffs"), 800);
-    } catch (e) {
-      setErr(e?.response?.data?.message || e?.message || "Failed to add staff.");
+    } catch (e2) {
+      setErr(e2?.response?.data?.message || e2?.message || "Failed to add staff.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <main className="min-h-screen bg-white text-gray-900">
-      <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-8">
+    <main className="min-h-screen bg-[#0f1729] px-6 py-8">
+      <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <header className="mb-6">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Add New Staff</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            {isSuperAdmin ? (
-              <>As <span className="font-medium">SuperAdmin</span>, you can add Admin, PM, or Engineer.</>
-            ) : (
-              <>As <span className="font-medium">Admin</span>, you can add PM or Engineer.</>
-            )}
-          </p>
-        </header>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-lg">
+              <UserPlus className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-3xl text-white">Add New Staff</h1>
+              <p className="text-sm text-slate-400 mt-1">
+                {isSuperAdmin ? (
+                  <>
+                    As <span className="text-purple-400 font-medium">SuperAdmin</span>, you can add Admin, PM, or Engineer.
+                  </>
+                ) : (
+                  <>
+                    As <span className="text-blue-400 font-medium">Admin</span>, you can add PM or Engineer.
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+        </motion.div>
 
         {/* Alerts */}
         {err && (
-          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200 flex items-center gap-2"
+          >
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
             {err}
-          </div>
+          </motion.div>
         )}
         {ok && (
-          <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200 flex items-center gap-2"
+          >
+            <Check className="w-4 h-4 flex-shrink-0" />
             {ok}
-          </div>
+          </motion.div>
         )}
 
         {/* Form Card */}
-        <form
+        <motion.form
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
           onSubmit={handleSubmit}
-          className="space-y-5 rounded-2xl border border-gray-200 bg-white shadow-md p-6"
+          className="rounded-2xl border border-slate-700/50 bg-[#1a2332] shadow-xl p-8"
         >
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="First Name" value={firstName} onChange={setFirstName} required />
-            <Field label="Last Name"  value={lastName}  onChange={setLastName}  required />
+          <div className="space-y-6">
+            {/* Name Fields */}
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+              <Field label="First Name" value={firstName} onChange={setFirstName} required placeholder="John" />
+              <Field label="Last Name" value={lastName} onChange={setLastName} required placeholder="Doe" />
+            </div>
+
+            {/* Email */}
+            <Field label="Email" type="email" value={email} onChange={setEmail} required placeholder="john.doe@company.com" />
+
+            {/* Phone */}
+            <Field label="Phone" type="tel" value={phone} onChange={setPhone} placeholder="+1 555 000 1234" />
+
+            {/* Gender & Role */}
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+              <Select
+                label="Gender"
+                value={gender}
+                onChange={setGender}
+                options={[
+                  { value: "", label: "Select…" },
+                  { value: "Male", label: "Male" },
+                  { value: "Female", label: "Female" },
+                  { value: "Other", label: "Other" },
+                ]}
+              />
+              <Select label="Role" value={role} onChange={setRole} required options={roleOptions} />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-3 pt-4 border-t border-slate-700/50">
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                type="submit"
+                disabled={loading}
+                className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:from-purple-500 hover:to-pink-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2 shadow-lg"
+              >
+                <UserPlus className="w-4 h-4" />
+                {loading ? "Adding…" : "Add Staff"}
+              </motion.button>
+
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                type="button"
+                onClick={reset}
+                disabled={loading}
+                className="bg-[#1f2937] text-white px-6 py-2.5 rounded-lg text-sm font-medium border border-slate-700/50 hover:bg-[#252f3f] transition-all disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                Clear
+              </motion.button>
+
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                type="button"
+                onClick={() => navigate(-1)}
+                className="ml-auto bg-[#1f2937] text-white px-6 py-2.5 rounded-lg text-sm font-medium border border-slate-700/50 hover:bg-[#252f3f] transition-all inline-flex items-center gap-2"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back
+              </motion.button>
+            </div>
           </div>
+        </motion.form>
 
-          <Field label="Email" type="email" value={email} onChange={setEmail} required />
-          <Field label="Phone" type="tel" value={phone} onChange={setPhone} placeholder="+1 555 000 1234" />
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Select
-              label="Gender"
-              value={gender}
-              onChange={setGender}
-              options={[
-                { value: "", label: "Select…" },
-                { value: "Male", label: "Male" },
-                { value: "Female", label: "Female" },
-                { value: "Other", label: "Other" },
-              ]}
-            />
-            <Select
-              label="Role"
-              value={role}
-              onChange={setRole}
-              required
-              options={roleOptions}
-            />
-          </div>
-
-          <div className="flex items-center gap-3 pt-2">
-            <button
-              type="submit"
-              disabled={loading}
-              className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-900 disabled:opacity-50"
-            >
-              {loading ? "Adding…" : "Add Staff"}
-            </button>
-
-            <button
-              type="button"
-              onClick={reset}
-              disabled={loading}
-              className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50"
-            >
-              Clear
-            </button>
-
-            <button
-              type="button"
-              onClick={() => navigate(-1)}
-              className="ml-auto rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50"
-            >
-              Back
-            </button>
-          </div>
-        </form>
+        {/* Info Card */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="mt-6 rounded-xl border border-slate-700/50 bg-[#1a2332] p-5"
+        >
+          <h3 className="text-sm text-white mb-2">Role Permissions</h3>
+          <ul className="space-y-2 text-xs text-slate-400">
+            <li className="flex items-start gap-2">
+              <span className="text-purple-400">•</span>
+              <span>
+                <strong className="text-slate-300">Project Manager:</strong> Can manage projects, assign tasks, and track progress
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-blue-400">•</span>
+              <span>
+                <strong className="text-slate-300">Engineer:</strong> Can work on assigned tasks and update their status
+              </span>
+            </li>
+            {isSuperAdmin && (
+              <li className="flex items-start gap-2">
+                <span className="text-pink-400">•</span>
+                <span>
+                  <strong className="text-slate-300">Admin:</strong> Can add PMs and Engineers, manage organization settings
+                </span>
+              </li>
+            )}
+          </ul>
+        </motion.div>
       </div>
     </main>
   );
@@ -172,8 +249,9 @@ export default function AddStaff() {
 function Field({ label, value, onChange, type = "text", required = false, placeholder = "" }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700">
-        {label}{required && " *"}
+      <label className="block text-sm font-medium text-slate-300 mb-2">
+        {label}
+        {required && <span className="text-red-400 ml-1">*</span>}
       </label>
       <input
         type={type}
@@ -181,7 +259,7 @@ function Field({ label, value, onChange, type = "text", required = false, placeh
         onChange={(e) => onChange(e.target.value)}
         required={required}
         placeholder={placeholder}
-        className="mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-black focus:ring-black"
+        className="w-full rounded-lg border border-slate-700/50 bg-[#0f1729] text-white px-4 py-2.5 text-sm placeholder:text-slate-500 focus:border-purple-500/50 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all"
       />
     </div>
   );
@@ -190,17 +268,20 @@ function Field({ label, value, onChange, type = "text", required = false, placeh
 function Select({ label, value, onChange, options = [], required = false }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700">
-        {label}{required && " *"}
+      <label className="block text-sm font-medium text-slate-300 mb-2">
+        {label}
+        {required && <span className="text-red-400 ml-1">*</span>}
       </label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         required={required}
-        className="mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-black focus:ring-black"
+        className="w-full rounded-lg border border-slate-700/50 bg-[#0f1729] text-white px-4 py-2.5 text-sm focus:border-purple-500/50 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all cursor-pointer"
       >
         {options.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
         ))}
       </select>
     </div>

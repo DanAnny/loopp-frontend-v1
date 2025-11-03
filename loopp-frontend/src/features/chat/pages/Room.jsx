@@ -1,4 +1,3 @@
-// frontend/src/features/chat/pages/Room.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import { Link } from "react-router-dom";
@@ -42,7 +41,6 @@ function unreadCountFor(userId, roomId) {
 function incUnread(userId, roomId) {
   const m = getUnreadMap(userId);
   const cur = m[roomId]?.count || 0;
-  // increment properly
   m[roomId] = { count: cur + 1, lastReadAt: m[roomId]?.lastReadAt || null };
   setUnreadMap(userId, m);
 }
@@ -105,14 +103,13 @@ function normalizeIncoming(m, meId, dir = {}) {
   // Directory lookup if we only have an id
   const lookup = (senderId && dir[senderId]) ? dir[senderId] : {};
 
-  // NEW: pull name/email from message for Clients
+  // pull name/email from message for Clients
   const clientName  = (m.clientName || "").toString().trim();
   const clientEmail = (m.clientEmail || "").toString().trim();
 
   const first = (rawSender.firstName ?? lookup.firstName ?? "").toString().trim();
   const last  = (rawSender.lastName  ?? lookup.lastName  ?? "").toString().trim();
 
-  // include clientEmail as a fallback here
   const email = (
     rawSender.email ??
     lookup.email ??
@@ -124,7 +121,6 @@ function normalizeIncoming(m, meId, dir = {}) {
   const explicitName = (m.senderName || "").toString().trim();
   const username = (rawSender.username || "").toString().trim();
 
-  // Role normalization (respect senderType for clients)
   const rawRole =
     rawSender.role ||
     m.senderRole ||
@@ -134,13 +130,6 @@ function normalizeIncoming(m, meId, dir = {}) {
     "User";
   const role = normalizeRole(rawRole);
 
-  // Build a nicer display name:
-  // 1) explicitName (unless it's literally "Client")
-  // 2) full name (staff)
-  // 3) clientName (from message)
-  // 4) email local-part (incl. clientEmail)
-  // 5) username
-  // 6) role as absolute last resort
   const emailLocal = email ? email.split("@")[0] : "";
   let senderName =
     (explicitName && explicitName.toLowerCase() !== "client" ? explicitName : "") ||
@@ -168,7 +157,6 @@ function normalizeIncoming(m, meId, dir = {}) {
     senderType: (m.senderType || "").toString(),
     isMine,
 
-    // keep a compact sender stub for staff; client msgs won’t have one
     sender: {
       _id: senderId || undefined,
       firstName: first || undefined,
@@ -177,7 +165,6 @@ function normalizeIncoming(m, meId, dir = {}) {
       role
     },
 
-    // NEW: carry through client name/email so the bubble can use them
     clientName: clientName || undefined,
     clientEmail: clientEmail || (email && role === "Client" ? email : undefined),
 
@@ -205,7 +192,7 @@ function safeAppend(setMessages, incoming) {
     return [...prev, incoming];
   });
 }
-async function waitForSocketConnected(s, timeout = 4000) {
+async function waitForSocketConnected(s, timeout = 20000) {
   return new Promise((resolve, reject) => {
     if (!s) return reject(new Error("No socket"));
     if (s.connected) return resolve(true);
@@ -232,7 +219,7 @@ const formatDateSeparator = (date) => {
   if (sameDay(date, today)) return "Today";
   if (sameDay(date, yest)) return "Yesterday";
 
-  const diffDays = Math.floor((today - date) / (1000 * 60 * 60 * 24));
+  const diffDays = Math.floor((+today - +date) / (1000 * 60 * 60 * 24));
   if (diffDays < 7) return date.toLocaleDateString([], { weekday: "long" });
   return date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
 };
@@ -263,9 +250,82 @@ const toConversation = (typingByRoom) => (r) => {
   };
 };
 
+/* ======================= NEW: Friendly Fatal Error Screen ======================= */
+function ErrorScreen({ kind, title, message, onRefresh, onRetry, retryLabel = "Try Again" }) {
+  return (
+    <div className="h-screen w-full flex flex-col items-center justify-center bg-gradient-to-b from-gray-50 to-white px-6 text-center">
+      {/* Animated “engineer tools” scene */}
+      <div className="relative mb-6">
+        {/* Gear */}
+        <svg viewBox="0 0 64 64" className="w-20 h-20 text-gray-400 animate-spin-slow" style={{ animationDuration: "6s" }}>
+          <g fill="currentColor">
+            <path d="M27 4h10l1.2 5.4 5.1 2.1 4.3-3.5 7.1 7.1-3.5 4.3 2.1 5.1L60 27v10l-5.4 1.2-2.1 5.1 3.5 4.3-7.1 7.1-4.3-3.5-5.1 2.1L37 60H27l-1.2-5.4-5.1-2.1-4.3 3.5-7.1-7.1 3.5-4.3-2.1-5.1L4 37V27l5.4-1.2 2.1-5.1-3.5-4.3 7.1-7.1 4.3 3.5 5.1-2.1L27 4zm5 16a12 12 0 100 24 12 12 0 000-24z"/>
+          </g>
+        </svg>
+        {/* Wrench */}
+        <svg viewBox="0 0 64 64" className="w-20 h-20 text-gray-500 absolute -bottom-4 -right-6 animate-bounce-slow" style={{ animationDuration: "2.5s" }}>
+          <path fill="currentColor" d="M50 10a10 10 0 00-9.7 7.5l6.2 6.2a3 3 0 01-4.2 4.2l-6.2-6.2A10 10 0 1050 10zM21 43l-9 9a3 3 0 004.2 4.2l9-9a10.7 10.7 0 01-4.2-4.2z"/>
+        </svg>
+      </div>
+
+      <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">{title}</h1>
+      <p className="mt-2 max-w-xl text-sm sm:text-base text-gray-600">
+        {message}
+      </p>
+
+      <div className="mt-4 text-xs text-gray-500">
+        {kind === "SOCKET_TIMEOUT" && "Hint: If you’re on a slow or flaky connection, a quick refresh usually fixes it."}
+        {kind === "JOIN_FAILED" && "Hint: The room may have briefly dropped. Rejoin to pick up right where you left off."}
+        {kind === "GENERIC" && "Hint: You can refresh the page, or try again in a moment."}
+      </div>
+
+      <div className="mt-6 flex items-center gap-3">
+        {onRetry && (
+          <button
+            onClick={onRetry}
+            className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold bg-black text-white hover:bg-black/90 active:scale-[.98] transition"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M9 7V3m6 4V3M7 14h10m-9 0v2a5 5 0 0010 0v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+            {retryLabel}
+          </button>
+        )}
+        <button
+          onClick={onRefresh}
+          className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold border border-gray-300 bg-white hover:bg-gray-50 active:scale-[.98] transition"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 10.002 8.002" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+          </svg>
+          Refresh Page
+        </button>
+      </div>
+
+      <div className="mt-6 inline-flex items-center gap-2 text-[11px] rounded-full border border-gray-200 bg-white px-3 py-1 text-gray-600">
+        <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></span>
+        Connection lost • Click a button to continue
+      </div>
+
+      <style>
+        {`
+          .animate-spin-slow { animation: spin 6s linear infinite; }
+          .animate-bounce-slow { animation: bounce 2.5s infinite; }
+          @keyframes spin { to { transform: rotate(360deg); } }
+          @keyframes bounce {
+            0%,100% { transform: translateY(0); }
+            50% { transform: translateY(-6px); }
+          }
+        `}
+      </style>
+    </div>
+  );
+}
+
+/* ===================================== Room ===================================== */
 export default function Room() {
   const user = useSelector((s) => s.auth.user);
-  const [memberDir, setMemberDir] = useState({}); // id -> { firstName, lastName, email, role }
+  const [memberDir, setMemberDir] = useState({});
   const userId = user?._id || user?.id;
   const userRole = normalizeRole((user?.role || "User").toString());
   const userName =
@@ -278,7 +338,11 @@ export default function Room() {
 
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
+
   const [err, setErr] = useState("");
+
+  // fatal error state for connection/join issues
+  const [fatal, setFatal] = useState(null);
 
   const [messages, setMessages] = useState([]);
   const [typingByRoom, setTypingByRoom] = useState({});
@@ -300,6 +364,9 @@ export default function Room() {
   const scrollerRef = useRef(null);
   const atBottomRef = useRef(true);
   const messageRefs = useRef({});
+
+  // trigger rejoin attempts
+  const [rejoinTick, setRejoinTick] = useState(0);
 
   /* ----------------------------- typing cleanup ---------------------------- */
   useEffect(() => {
@@ -324,6 +391,12 @@ export default function Room() {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    const onOnline = () => {};
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, []);
+
   /* ------------------------------ load rooms ------------------------------ */
   useEffect(() => {
     let mounted = true;
@@ -338,7 +411,7 @@ export default function Room() {
 
         list.sort(
           (a, b) =>
-            new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0)
+            new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime()
         );
 
         if (!mounted) return;
@@ -371,10 +444,29 @@ export default function Room() {
       try {
         setJoining(true);
         setErr("");
+        setFatal(null);
 
         const s = connectSocket(userId);
-        await waitForSocketConnected(getSocket());
-        await joinRoom(activeRoomId, userId);
+
+        try {
+          await waitForSocketConnected(getSocket());
+        } catch (e) {
+          if (cancelled) return;
+          setFatal({ kind: "SOCKET_TIMEOUT", message: e?.message || "Socket connect timeout" });
+          return;
+        }
+
+        try {
+          await joinRoom(activeRoomId, userId);
+        } catch (e) {
+          if (cancelled) return;
+          setFatal({
+            kind: "JOIN_FAILED",
+            message: e?.response?.data?.message || e?.message || "Failed to join room",
+          });
+          return;
+        }
+
         if (cancelled) return;
 
         // messages
@@ -462,13 +554,11 @@ export default function Room() {
 
         // socket listeners
         const onMessage = (msg) => {
-          console.debug("RAW_MSG", msg);
           const shaped = normalizeIncoming(msg, userId);
           if (!shaped) return;
 
           const rid = String(shaped.room || activeRoomId);
 
-          // update room preview
           setRooms((prev) => {
             let updated = prev;
             const idx = updated.findIndex((x) => x.id === rid);
@@ -484,7 +574,6 @@ export default function Room() {
             return updated;
           });
 
-          // unread for other rooms
           if (rid !== String(activeRoomId) && !shaped.isMine) {
             incUnread(userId, rid);
             setRooms((prev) =>
@@ -495,7 +584,6 @@ export default function Room() {
             return;
           }
 
-          // active room → append & maybe scroll
           safeAppend(setMessages, shaped);
           const el = scrollerRef.current;
           if (!el) return;
@@ -543,21 +631,24 @@ export default function Room() {
           setProject((p) => (p ? { ...p, reopenRequested: true } : p));
         };
 
-        s.off("message", onMessage);
-        s.off("typing", onTyping);
-        s.off("rated", onRated);
-        s.off("room:closed", onRoomClosed);
-        s.off("room:reopened", onRoomReopened);
-        s.off("reopen:requested", onReopenRequested);
+        const s2 = getSocket();
+        s2?.off("message", onMessage);
+        s2?.off("typing", onTyping);
+        s2?.off("rated", onRated);
+        s2?.off("room:closed", onRoomClosed);
+        s2?.off("room:reopened", onRoomReopened);
+        s2?.off("reopen:requested", onReopenRequested);
 
-        s.on("message", onMessage);
-        s.on("typing", onTyping);
-        s.on("rated", onRated);
-        s.on("room:closed", onRoomClosed);
-        s.on("room:reopened", onRoomReopened);
-        s.on("reopen:requested", onReopenRequested);
+        s2?.on("message", onMessage);
+        s2?.on("typing", onTyping);
+        s2?.on("rated", onRated);
+        s2?.on("room:closed", onRoomClosed);
+        s2?.on("room:reopened", onRoomReopened);
+        s2?.on("reopen:requested", onReopenRequested);
       } catch (e) {
-        setErr(e?.message || "Failed to join room");
+        if (!cancelled) {
+          setFatal({ kind: "GENERIC", message: e?.message || "Failed to join chat" });
+        }
       } finally {
         setJoining(false);
       }
@@ -566,7 +657,7 @@ export default function Room() {
     return () => {
       cancelled = true;
     };
-  }, [activeRoomId, userId, userRole]);
+  }, [activeRoomId, userId, userRole, rejoinTick]);
 
   /* ------------------------------ derived flags ----------------------------- */
   const rated = useMemo(() => {
@@ -579,7 +670,6 @@ export default function Room() {
   const canShowReopen = userRole === "PM" && roomClosed && !!project?.reopenRequested;
 
   /* ----------------------------- presence counts ----------------------------- */
-  // Online if last activity < 5 min or currently typing
   const presence = useMemo(() => {
     const map = new Map();
     const now = Date.now();
@@ -592,7 +682,6 @@ export default function Room() {
       if (last > prev.last) map.set(key, { name: m.senderName, role: m.senderRole, last });
     }
 
-    // always include me
     map.set(userName + "|" + userRole, { name: userName, role: userRole, last: now });
 
     const typers = Object.values(typingByRoom[activeRoomId] || {});
@@ -667,7 +756,6 @@ export default function Room() {
   const handleSendMessage = async (text, files = []) => {
     if (!activeRoomId || roomClosed) return;
 
-    // file-attachment logic preserved
     let fileArray = [];
     if (files) {
       if (typeof FileList !== "undefined" && files instanceof FileList) {
@@ -737,13 +825,52 @@ export default function Room() {
       map[key].push(m);
     }
     return Object.keys(map)
-      .sort((a, b) => new Date(a) - new Date(b))
+      .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
       .map((k) => ({ date: new Date(k), list: map[k] }));
   }, [messages]);
 
   /* ---------------------------------- UI ---------------------------------- */
-  if (loading) return <div className="h-screen grid place-items-center">Loading chat…</div>;
-  if (err) return <div className="h-screen grid place-items-center text-red-600 px-4 text-center break-words">{err}</div>;
+  if (loading) {
+    return (
+      <div className="h-screen grid place-items-center text-gray-600">
+        Loading chat…
+      </div>
+    );
+  }
+
+  if (fatal) {
+    const { kind } = fatal;
+    const commonRefresh = () => window.location.reload();
+    const retry = () => {
+      setFatal(null);
+      setRejoinTick((t) => t + 1);
+    };
+
+    const title =
+      kind === "SOCKET_TIMEOUT"
+        ? "Your connection took too long"
+        : kind === "JOIN_FAILED"
+          ? "We couldn’t join the room"
+          : "Something broke while connecting";
+
+    const copy =
+      kind === "SOCKET_TIMEOUT"
+        ? "It looks like your network is a bit slow and the chat socket couldn’t connect in time. Click Refresh to reload, or Try Again to reconnect now."
+        : kind === "JOIN_FAILED"
+          ? "The room briefly went out of sync and we couldn’t join. Your network may have dropped for a moment. Rejoin to continue chatting, or refresh the page."
+          : "Your chat session lost its connection. You can refresh the page or try again.";
+
+    return (
+      <ErrorScreen
+        kind={kind}
+        title={title}
+        message={copy}
+        onRefresh={commonRefresh}
+        onRetry={retry}
+        retryLabel={kind === "JOIN_FAILED" ? "Rejoin Room" : "Try Again"}
+      />
+    );
+  }
 
   const conversations = rooms.map(toConversation(typingByRoom));
   const headerContact = {
@@ -781,9 +908,7 @@ export default function Room() {
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Sidebar */}
         <aside
-          className={`${
-            showSidebar ? "translate-x-0" : "-translate-x-full"
-          } sm:translate-x-0 fixed sm:relative inset-y-0 left-0 z-40 w-80 border-r transition-transform duration-300 sm:flex flex-col bg-white border-gray-200`}
+          className={`${showSidebar ? "translate-x-0" : "-translate-x-full"} sm:translate-x-0 fixed sm:relative inset-y-0 left-0 z-40 w-80 border-r transition-transform duration-300 sm:flex flex-col bg-white border-gray-200`}
         >
           {showSidebar && (
             <div
@@ -927,11 +1052,24 @@ export default function Room() {
                     No messages yet
                   </div>
                 )}
-                {/* Bottom spacer so timestamps & input never clash */}
                 <div className="h-8" />
               </div>
 
-              {/* Typing Indicator */}
+              {!isAtBottom && unreadFloatCount > 0 && (
+                <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-20">
+                  <UnreadMessagesIndicator
+                    count={unreadFloatCount}
+                    onClick={() => {
+                      scrollerRef.current?.scrollTo({
+                        top: scrollerRef.current.scrollHeight,
+                        behavior: "smooth",
+                      });
+                      setUnreadFloatCount(0);
+                    }}
+                  />
+                </div>
+              )}
+
               {typingText && headerContact.status !== "Closed" && (
                 <div className="px-4 pb-2 relative z-20">
                   <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs bg-white/90 backdrop-blur border-gray-200 text-gray-600">
@@ -945,7 +1083,6 @@ export default function Room() {
                 </div>
               )}
 
-              {/* Input */}
               <div className="sticky bottom-0 border-t bg-white/95 backdrop-blur border-gray-200 z-20">
                 <div className="max-w-6xl mx-auto px-3 md:px-4 py-2">
                   <ChatInput
@@ -960,20 +1097,6 @@ export default function Room() {
                 </div>
               </div>
 
-              {/* Unread floater */}
-              {unreadFloatCount > 0 && !isAtBottom && (
-                <UnreadMessagesIndicator
-                  count={unreadFloatCount}
-                  onClick={() => {
-                    const el = scrollerRef.current;
-                    if (!el) return;
-                    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-                    setUnreadFloatCount(0);
-                  }}
-                />
-              )}
-
-              {/* Inline error */}
               {err && (
                 <div className="px-4 py-2">
                   <InlineNotification
@@ -996,7 +1119,6 @@ export default function Room() {
         </section>
       </div>
 
-      {/* Invoice Modal */}
       {showInvoiceModal && userRole === "PM" && (
         <InvoiceModal
           projectTitle={project?.projectTitle}
@@ -1013,16 +1135,13 @@ export default function Room() {
                 memo: memo || `Invoice for ${project?.projectTitle || "project"}`,
               };
 
-              // create the invoice
               const { data } = await invoices.createInvoice(payload);
               const url = data?.hostedUrl || data?.invoiceUrl;
               if (!url) throw new Error("No invoice URL returned.");
 
-              // drop a message into the chat with the hosted URL
               const msg = `🧾 Invoice created — ${url}`;
               await chatApi.send({ roomId: activeRoomId, text: msg });
 
-              // close modal + toast-like inline notification
               setShowInvoiceModal(false);
               setNotifications((p) => [
                 ...p,
@@ -1039,7 +1158,6 @@ export default function Room() {
           }}
         />
       )}
-
     </div>
   );
 }

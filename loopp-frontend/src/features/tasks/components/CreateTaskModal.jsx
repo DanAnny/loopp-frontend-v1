@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X, Calendar, User, Mail, FileText, Loader2, CheckCircle,
-  AlertTriangle, Plus, Users as UsersIcon, Check
+  AlertTriangle, Plus, Users as UsersIcon, Check, Sparkles, ArrowRight, Inbox
 } from "lucide-react";
 import * as Projects from "@/services/projects.service";
 import * as Users from "@/services/users.service";
@@ -33,17 +33,15 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
     firstName: "",
     lastName: "",
     email: "",
-    // WP-provided string (can be any format) — shown read-only
     completionDeadlineLabel: "",
-    // PM-picked yyyy-mm-dd date
-    pmDeadline: "",
+    pmDeadline: "", // YYYY-MM-DD
   });
 
   const firstFieldRef = useRef(null);
   const dialogRef = useRef(null);
+  const deadlineRef = useRef(null);
 
   /* ------------------------ SAFE DATE HELPERS (LOCAL) ------------------------ */
-  // Accepts 'YYYY-MM-DD' or ISO-like '2025-10-13T...' → returns 'YYYY-MM-DD' or ''.
   function parseISODateOnly(value) {
     if (!value || typeof value !== "string") return "";
     const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -53,14 +51,21 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
     return isFinite(dt) ? dt.toISOString().slice(0, 10) : "";
   }
 
-  // For showing the client’s requested deadline as a label:
-  // - if it's a valid iso-ish date, show the yyyy-mm-dd
-  // - else show the original text as-is
   function normalizeCompletionLabel(v) {
     if (!v) return "";
     const iso = parseISODateOnly(v);
     return iso || String(v);
   }
+
+  // Today in local time as YYYY-MM-DD (for <input type="date" min>)
+  function todayISO() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  const minDate = todayISO();
 
   useEffect(() => {
     if (!open) return;
@@ -115,7 +120,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
   const normalizeRequests = (list) =>
     list.map((r, i) => {
       const realId = String(r._id || r.id || r.requestId || `noid-${i}`);
-      const uiKey = `reqkey-${realId}-${i}`; // guaranteed non-empty unique
+      const uiKey = `reqkey-${realId}-${i}`;
       return { ...r, __uiKey: uiKey, __realId: realId };
     });
 
@@ -157,7 +162,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
     const realId = r.__realId;
 
     const label = normalizeCompletionLabel(r?.completionDate);
-    const guessedISO = parseISODateOnly(r?.completionDate); // prefill PM deadline if it was a real date
+    const guessedISO = parseISODateOnly(r?.completionDate);
 
     setForm((p) => ({
       ...p,
@@ -168,8 +173,8 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
       firstName: r?.firstName || "",
       lastName: r?.lastName || "",
       email: r?.email || "",
-      completionDeadlineLabel: label,   // safe read-only text
-      pmDeadline: guessedISO || "",     // yyyy-mm-dd
+      completionDeadlineLabel: label,
+      pmDeadline: guessedISO || "", // prefill if client gave ISO
       title: r?.projectTitle || r?.title || "",
       description: r?.projectDescription || `Task for "${r?.projectTitle || r?.title || "Project"}"`,
     }));
@@ -178,12 +183,12 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
 
   const onChange = (k, v) => { setForm((p) => ({ ...p, [k]: v })); setError(""); };
 
+  // ✅ include deadline requirement
   const validate = () => {
     if (!form.requestId) return "Select a project request";
     if (!form.engineerId) return "Select an engineer";
     if (!form.title.trim()) return "Task title is required";
-    // Uncomment if you want to hard-require PM deadline:
-    // if (!form.pmDeadline) return "Please pick a task deadline";
+    if (!form.pmDeadline) return "Select a task deadline";
     return null;
   };
 
@@ -215,15 +220,18 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
     await reallySubmit();
   };
 
+  // ✅ send BOTH "deadline" and "pmDeadline" so backend always fills taskDeadline
   const reallySubmit = async () => {
     try {
       setLoading(true); setError("");
+      const iso = form.pmDeadline; // already YYYY-MM-DD
       await Tasks.createTask({
         requestId: form.requestId,
         engineerId: form.engineerId,
         title: form.title.trim(),
         description: form.description.trim(),
-        pmDeadline: form.pmDeadline || null, // NEW
+        deadline: iso,
+        pmDeadline: iso,
       });
       setSuccess(true);
       setTimeout(() => {
@@ -248,8 +256,11 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
           <motion.button
             aria-label="Close modal"
             onClick={handleClose}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[80]"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 z-[80]"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
           />
 
           {/* Dialog */}
@@ -258,123 +269,197 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
               ref={dialogRef}
               role="dialog"
               aria-modal="true"
-              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 10 }}
-              transition={{ duration: 0.18 }}
-              className="w-full max-w-2xl bg-white rounded-2xl shadow-xl border border-black/10 max-h-[85vh] flex flex-col overflow-hidden"
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="w-full max-w-2xl bg-[#0f1729] rounded-2xl shadow-2xl border border-slate-700/50 max-h-[90vh] flex flex-col overflow-hidden"
               onClick={(e)=>e.stopPropagation()}
             >
-              {/* Top accent */}
-              <div className="h-1 bg-gradient-to-r from-black/80 via-black to-black/80" />
+              {/* Top accent bar */}
+              <motion.div
+                className="h-1 bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"
+                initial={{ scaleX: 0 }}
+                animate={{ scaleX: 1 }}
+                transition={{ delay: 0.05, duration: 0.3 }}
+              />
 
               {/* Header */}
-              <div className="flex items-center justify-between p-4 border-b border-black/10">
+              <div className="flex items-center justify-between p-5 border-b border-slate-700/50 bg-[#1a2332]">
                 <div className="min-w-0">
-                  <h2 className="text-lg font-semibold text-foreground truncate">Assign Engineer & Create Task</h2>
-                  <p className="text-xs text-muted-foreground">Pick a project request, then select an engineer.</p>
+                  <h2 className="text-xl text-white tracking-tight mb-1">Create Task Assignment</h2>
+                  <p className="text-xs text-slate-400 uppercase tracking-[0.15em]">Project • Engineer • Details</p>
                 </div>
                 <motion.button
                   onClick={handleClose}
                   disabled={loading}
-                  whileHover={{ rotate: 90, scale: 1.05 }}
+                  whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  className="p-2 rounded-lg hover:bg-black/5 disabled:opacity-50"
+                  className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-slate-700/50 disabled:opacity-50 transition-all"
                   aria-label="Close"
                 >
-                  <X className="w-5 h-5 text-muted-foreground" />
+                  <X className="w-5 h-5 text-white" />
                 </motion.button>
               </div>
 
               {/* Body (scrollable) */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <div className="flex-1 overflow-y-auto p-5 space-y-5 bg-[#0f1729]">
                 <AnimatePresence mode="wait">
                   {error && (
                     <motion.div
-                      initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-                      className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3"
+                      initial={{ opacity: 0, y: -5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -5 }}
+                      transition={{ duration: 0.15 }}
+                      className="text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3.5 flex items-center gap-3"
                     >
-                      {error}
+                      <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+                      <span>{error}</span>
                     </motion.div>
                   )}
                   {success && (
                     <motion.div
-                      initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-                      className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center gap-2"
+                      initial={{ opacity: 0, y: -5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -5 }}
+                      transition={{ duration: 0.15 }}
+                      className="text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-3.5 flex items-center gap-3"
                     >
-                      <CheckCircle className="w-4 h-4" /> Task created successfully!
+                      <CheckCircle className="w-5 h-5" />
+                      <span>Task created successfully!</span>
                     </motion.div>
                   )}
                 </AnimatePresence>
 
-                {/* Project dropdown */}
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">Project Request</label>
-                  <div className="flex gap-2">
-                    <select
-                      ref={firstFieldRef}
-                      value={form.uiRequestKey}
-                      onChange={(e) => onPickRequest(e.target.value)}
-                      disabled={loadingLists || loading}
-                      className="flex-1 field-input pl-3"
-                    >
-                      <option key="placeholder-option" value="">
-                        Select a request…
-                      </option>
-                      {requests.map((r) => (
-                        <option key={`req-${r.__uiKey}`} value={r.__uiKey}>
-                          {(r.projectTitle || r.title || "Untitled")}{r.engineerAssigned ? " • (Assigned)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={loadLists}
-                      disabled={loadingLists || loading}
-                      className="px-3 py-2 rounded-xl border border-black/20 hover:bg-black/[0.02]"
-                      title="Reload"
-                    >
-                      {loadingLists ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4 rotate-45" />}
-                    </button>
-                  </div>
+                {/* Project request block */}
+                <motion.div
+                  initial={{ opacity: 0, y: 5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.05, duration: 0.2 }}
+                  className="bg-[#1a2332] border border-slate-700/50 rounded-xl p-4"
+                >
+                  <label className="block text-xs uppercase tracking-[0.15em] text-slate-400 mb-3">Project Request</label>
 
-                  {form.requestId && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                      <RO label="Project Title"  icon={FileText} value={form.projectTitle || "—"} />
-                      <RO label="Client Deadline (from form)" icon={Calendar} value={form.completionDeadlineLabel || "—"} />
-                      <RO label="Client Name"    icon={User}     value={`${form.firstName} ${form.lastName}`.trim() || "—"} />
-                      <RO label="Client Email"   icon={Mail}     value={form.email || "—"} />
+                  {/* Empty state */}
+                  {!loadingLists && requests.length === 0 ? (
+                    <div className="flex items-center justify-between gap-3 p-4 rounded-xl bg-[#0f1729] border border-slate-700/50">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-white/5 border border-slate-700/50">
+                          <Inbox className="w-5 h-5 text-slate-400" />
+                        </div>
+                        <div>
+                          <p className="text-slate-300 text-sm font-medium">No requests found</p>
+                          <p className="text-slate-500 text-xs">There are no project requests to assign yet.</p>
+                        </div>
+                      </div>
+                      <motion.button
+                        whileHover={{ rotate: 180, scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        type="button"
+                        onClick={loadLists}
+                        className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-slate-700/50 transition"
+                      >
+                        <Plus className="w-4 h-4 rotate-45 text-white" />
+                      </motion.button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <select
+                        ref={firstFieldRef}
+                        value={form.uiRequestKey}
+                        onChange={(e) => onPickRequest(e.target.value)}
+                        disabled={loadingLists || loading || requests.length === 0}
+                        className="flex-1 px-4 py-3 rounded-xl bg-[#0f1729] border border-slate-700/50 focus:outline-none focus:border-slate-600 transition-all text-white disabled:opacity-50"
+                      >
+                        <option key="placeholder-option" value="">
+                          {loadingLists ? "Loading…" : "Select a request…"}
+                        </option>
+                        {requests.map((r) => (
+                          <option key={`req-${r.__uiKey}`} value={r.__uiKey}>
+                            {(r.projectTitle || r.title || "Untitled")}
+                            {r.engineerAssigned ? " • (Assigned)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <motion.button
+                        whileHover={{ rotate: 180, scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        type="button"
+                        onClick={loadLists}
+                        disabled={loadingLists || loading}
+                        className="px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-slate-700/50 disabled:opacity-50 transition-all"
+                        title="Reload"
+                      >
+                        {loadingLists ? <Loader2 className="w-5 h-5 animate-spin text-white" /> : <Plus className="w-5 h-5 rotate-45 text-white" />}
+                      </motion.button>
                     </div>
                   )}
-                </div>
+
+                  {form.requestId && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      transition={{ duration: 0.2 }}
+                      className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4 pt-4 border-t border-slate-700/50"
+                    >
+                      <RO label="Project Title"  icon={FileText} value={form.projectTitle || "—"} />
+                      <RO label="Client Deadline" icon={Calendar} value={form.completionDeadlineLabel || "—"} />
+                      <RO label="Client Name"    icon={User}     value={`${form.firstName} ${form.lastName}`.trim() || "—"} />
+                      <RO label="Client Email"   icon={Mail}     value={form.email || "—"} />
+                    </motion.div>
+                  )}
+                </motion.div>
 
                 {/* Engineer selector */}
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={!form.requestId || loadingLists || loading}
-                    onClick={() => setPickOpen(true)}
-                    className="inline-flex items-center gap-2 rounded-xl px-3 py-2 border border-black/20 hover:bg-black/[0.02] transition"
-                  >
-                    <UsersIcon className="w-4 h-4" />
-                    {form.engineerId ? `Change Engineer (${form.engineerName})` : "Select Engineer"}
-                  </button>
-                  {form.engineerId && (
-                    <span className="text-xs text-muted-foreground truncate">
-                      Selected: <span className="font-medium">{form.engineerName}</span>
-                    </span>
-                  )}
-                </div>
+                <motion.div
+                  initial={{ opacity: 0, y: 5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1, duration: 0.2 }}
+                  className="bg-[#1a2332] border border-slate-700/50 rounded-xl p-4"
+                >
+                  <label className="block text-xs uppercase tracking-[0.15em] text-slate-400 mb-3">Engineer Assignment</label>
+                  <div className="flex items-center gap-3">
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      type="button"
+                      disabled={!form.requestId || loadingLists || loading}
+                      onClick={() => setPickOpen(true)}
+                      className="inline-flex items-center gap-2 rounded-xl px-4 py-3 bg-white/5 hover:bg-white/10 border border-slate-700/50 disabled:opacity-50 transition-all"
+                    >
+                      <UsersIcon className="w-5 h-5 text-white" />
+                      <span className="text-white">{form.engineerId ? `Change (${form.engineerName})` : "Select Engineer"}</span>
+                    </motion.button>
+                    {form.engineerId && (
+                      <motion.div
+                        initial={{ opacity: 0, x: -5 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ duration: 0.15 }}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span className="font-medium">{form.engineerName}</span>
+                      </motion.div>
+                    )}
+                  </div>
+                </motion.div>
 
                 {/* Task meta */}
-                <div className="grid grid-cols-1 gap-3">
+                <motion.div
+                  initial={{ opacity: 0, y: 5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.15, duration: 0.2 }}
+                  className="bg-[#1a2332] border border-slate-700/50 rounded-xl p-4 space-y-4"
+                >
+                  <label className="block text-xs uppercase tracking-[0.15em] text-slate-400 mb-3">Task Details</label>
+
                   <Field label="Task Title" icon={FileText}>
                     <input
                       type="text"
                       value={form.title}
                       onChange={(e) => onChange("title", e.target.value)}
                       placeholder="e.g., Build client onboarding flow"
-                      className="field-input pl-10"
+                      className="w-full px-4 py-3 pl-11 rounded-xl bg-[#0f1729] border border-slate-700/50 focus:outline-none focus:border-slate-600 transition text-sm text-white placeholder-slate-400"
                       disabled={loading || success}
                     />
                   </Field>
@@ -385,43 +470,65 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
                       value={form.description}
                       onChange={(e) => onChange("description", e.target.value)}
                       placeholder="Briefly describe the deliverables…"
-                      className="field-input pl-10 resize-none"
+                      className="w-full px-4 py-3 pl-11 rounded-xl bg-[#0f1729] border border-slate-700/50 focus:outline-none focus:border-slate-600 transition text-sm text-white placeholder-slate-400 resize-none"
                       disabled={loading || success}
                     />
                   </Field>
 
-                  {/* NEW: PM-picked deadline */}
-                  <Field label="Task Deadline (PM)" icon={Calendar}>
+                  <Field label="Task Deadline" icon={Calendar} onIconClick={() => deadlineRef.current?.showPicker?.()}>
                     <input
+                      ref={deadlineRef}
                       type="date"
                       value={form.pmDeadline}
-                      onChange={(e) => onChange("pmDeadline", e.target.value)}
-                      className="field-input pl-10"
+                      min={minDate}                 // ⛔ past dates
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v && v < minDate) {
+                          setForm((p) => ({ ...p, pmDeadline: minDate }));
+                        } else {
+                          onChange("pmDeadline", v);
+                        }
+                      }}
+                      onFocus={(e) => e.target.showPicker?.()}
+                      className="w-full px-4 py-3 pl-11 rounded-xl bg-[#0f1729] border border-slate-700/50 focus:outline-none focus:border-slate-600 transition text-sm text-white placeholder-slate-400"
                       disabled={loading || success}
+                      aria-label="Select task deadline"
                     />
                   </Field>
-                </div>
+                </motion.div>
               </div>
 
               {/* Footer */}
-              <div className="p-4 border-t border-black/10 flex flex-col sm:flex-row gap-2">
-                <button
+              <div className="p-5 border-t border-slate-700/50 bg-[#1a2332] flex flex-col sm:flex-row gap-3">
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                   type="button"
                   onClick={handleClose}
                   disabled={loading}
-                  className="inline-flex justify-center items-center rounded-xl px-4 py-3 border border-black/20 text-foreground hover:bg-black/5 transition disabled:opacity-50"
+                  className="inline-flex justify-center items-center rounded-xl px-5 py-3 bg-white/5 hover:bg-white/10 border border-slate-700/50 text-white transition-all disabled:opacity-50"
                 >
                   Cancel
-                </button>
+                </motion.button>
                 <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                   type="button"
                   onClick={tryWarnOrSubmit}
                   disabled={loading}
-                  whileHover={{ scale: 1.01 }}
-                  whileTap={{ scale: 0.99 }}
-                  className="inline-flex justify-center items-center gap-2 rounded-xl px-4 py-3 bg-black text-white hover:bg-black/90 shadow-sm transition disabled:opacity-60 sm:ml-auto"
+                  className="inline-flex justify-center items-center gap-2 rounded-xl px-5 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600 shadow-lg transition-all disabled:opacity-60 sm:ml-auto"
                 >
-                  {loading ? (<><Loader2 className="w-4 h-4 animate-spin" /><span>Creating…</span></>) : ("Create Task")}
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span>Creating…</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Create Task</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
                 </motion.button>
               </div>
             </motion.div>
@@ -448,36 +555,56 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
           <AnimatePresence>
             {warn && (
               <>
-                <motion.div className="fixed inset-0 bg-black/50 z-[100]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={()=>setWarn(null)} />
+                <motion.div
+                  className="fixed inset-0 bg-black/70 z-[100]"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}
+                  onClick={()=>setWarn(null)}
+                />
                 <motion.div
                   className="fixed inset-0 z-[110] grid place-items-center p-3 sm:p-4"
-                  initial={{ opacity: 0, scale: 0.96, y: 10 }}
+                  initial={{ opacity: 0, scale: 0.95, y: 10 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.96, y: 10 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                  transition={{ duration: 0.2, ease: "easeOut" }}
                 >
-                  <div className="w-full max-w-lg bg-white rounded-2xl border border-black/20 shadow-2xl p-5" onClick={(e)=>e.stopPropagation()}>
-                    <div className="flex items-start gap-3">
-                      <div className="p-2 rounded-lg bg-amber-100 text-amber-800">
-                        <AlertTriangle className="w-5 h-5" />
+                  <div className="w-full max-w-lg bg-[#1a2332] rounded-2xl border border-slate-700/50 shadow-2xl p-6" onClick={(e)=>e.stopPropagation()}>
+                    <div className="flex items-start gap-4">
+                      <div className="p-3 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                        <AlertTriangle className="w-6 h-6" />
                       </div>
-                      <div>
-                        <h4 className="text-foreground font-semibold">Engineer is busy</h4>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {warn.engineer.firstName} {warn.engineer.lastName} is currently {warn.engineer.isBusy ? "busy" : "handling tasks"} ({warn.engineer.numberOfTask || 0} task(s)).
+                      <div className="flex-1">
+                        <h4 className="text-white mb-2">Engineer Capacity Warning</h4>
+                        <p className="text-sm text-slate-300 mb-3">
+                          <span className="font-medium">{warn.engineer.firstName} {warn.engineer.lastName}</span> is currently {warn.engineer.isBusy ? "busy" : "handling tasks"} with <span className="font-medium">{warn.engineer.numberOfTask || 0} active task(s)</span>.
                         </p>
                         {warn.recommend && (
-                          <p className="text-sm text-muted-foreground mt-2">
-                            Recommendation: <span className="font-medium">{warn.recommend.firstName} {warn.recommend.lastName}</span> ({warn.recommend.numberOfTask || 0} task(s){warn.recommend.isBusy ? ", busy" : ", available"}).
-                          </p>
+                          <div className="px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-300">
+                            <p className="flex items-center gap-2">
+                              <Sparkles className="w-4 h-4" />
+                              <span>Recommended: <span className="font-medium">{warn.recommend.firstName} {warn.recommend.lastName}</span> ({warn.recommend.numberOfTask || 0} tasks)</span>
+                            </p>
+                          </div>
                         )}
                       </div>
                     </div>
 
-                    <div className="flex gap-2 mt-5">
-                      <button className="px-4 py-3 rounded-xl border border-black/20 hover:bg-black/[0.02]" onClick={()=>setWarn(null)}>Cancel</button>
+                    <div className="flex gap-2 mt-6">
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        className="px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-slate-700/50 text-white transition-all"
+                        onClick={()=>setWarn(null)}
+                      >
+                        Cancel
+                      </motion.button>
                       {warn.recommend && (
-                        <button
-                          className="px-4 py-3 rounded-xl border border-black/20 hover:bg-black/[0.02]"
+                        <motion.button
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          className="px-4 py-3 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 transition-all"
                           onClick={() => {
                             setWarn(null);
                             setOverrideEngineerId(null);
@@ -489,18 +616,20 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
                           }}
                         >
                           Use Recommended
-                        </button>
+                        </motion.button>
                       )}
-                      <button
-                        className="px-4 py-3 rounded-xl bg-black text-white hover:bg-black/90 ml-auto"
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        className="px-4 py-3 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600 ml-auto transition-all"
                         onClick={async () => {
-                          setOverrideEngineerId(warn.engineer._id); // allow override once for this engineer
+                          setOverrideEngineerId(warn.engineer._id);
                           setWarn(null);
                           await reallySubmit();
                         }}
                       >
                         Keep Selection
-                      </button>
+                      </motion.button>
                     </div>
                   </div>
                 </motion.div>
@@ -515,14 +644,25 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
 
 /* ------------------------------- UI Helpers ------------------------------- */
 
-function Field({ label, icon: Icon, children }) {
+function Field({ label, icon: Icon, children, onIconClick }) {
+  // Detect textarea to adjust icon alignment
+  const isTextarea = children?.type === 'textarea';
   return (
     <div>
-      <label className="block text-sm font-medium text-foreground mb-1.5">{label}</label>
+      <label className="block text-xs uppercase tracking-[0.15em] text-slate-400 mb-2">{label}</label>
       <div className="relative">
-        {Icon && <Icon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />}
-        {/* inputs/textarea inside should include pl-10 to avoid overlap */}
-        {children}
+        {Icon && (
+          <button
+            type="button"
+            onClick={onIconClick}
+            className={`absolute left-3 ${isTextarea ? "top-3" : "top-1/2 -translate-y-1/2"} p-1 rounded-md hover:bg-white/5 focus:outline-none`}
+            aria-label={`${label} icon`}
+          >
+            <Icon className="w-4 h-4 text-slate-500" />
+          </button>
+        )}
+        {/* pad for icon */}
+        <div className={`${Icon ? "pl-8" : ""}`}>{children}</div>
       </div>
     </div>
   );
@@ -530,10 +670,14 @@ function Field({ label, icon: Icon, children }) {
 
 function RO({ label, icon: Icon, value }) {
   return (
-    <div className="relative">
-      <label className="block text-sm font-medium text-foreground mb-1.5">{label}</label>
-      <div className="field-input pl-10 bg-black/[0.03] min-h-[44px] flex items-center">{value}</div>
-      {Icon && <Icon className="pointer-events-none absolute left-3 top-[42px] w-4 h-4 text-muted-foreground" />}
+    <div>
+      <label className="block text-xs uppercase tracking-[0.15em] text-slate-500 mb-2">{label}</label>
+      <div className="relative">
+        <div className="px-4 py-2.5 pl-11 rounded-xl bg-[#0f1729] border border-slate-700/50 text-slate-300 text-sm min-h-[44px] flex items-center">
+          {value}
+        </div>
+        {Icon && <Icon className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />}
+      </div>
     </div>
   );
 }
@@ -542,36 +686,60 @@ function EngineerPicker({ open, onClose, engineers, onPick }) {
   if (!open) return null;
   return (
     <AnimatePresence>
-      <motion.div className="fixed inset-0 bg-black/50 z-[120]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
+      <motion.div
+        className="fixed inset-0 bg-black/70 z-[120]"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.15 }}
+        onClick={onClose}
+      />
       <motion.div
         className="fixed inset-0 z-[130] grid place-items-center p-3 sm:p-4"
-        initial={{ opacity: 0, scale: 0.96, y: 10 }}
+        initial={{ opacity: 0, scale: 0.95, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.96, y: 10 }}
+        exit={{ opacity: 0, scale: 0.95, y: 10 }}
+        transition={{ duration: 0.2, ease: "easeOut" }}
       >
-        <div className="w-full max-w-2xl bg-white rounded-2xl border border-black/20 shadow-2xl overflow-hidden" onClick={(e)=>e.stopPropagation()}>
-          <div className="px-4 py-3 border-b border-black/10 flex items-center justify-between">
-            <h3 className="font-semibold">Select Engineer</h3>
-            <button className="p-2 rounded-lg hover:bg-black/5" onClick={onClose}><X className="w-4 h-4" /></button>
+        <div className="w-full max-w-2xl bg-[#0f1729] rounded-2xl border border-slate-700/50 shadow-2xl overflow-hidden" onClick={(e)=>e.stopPropagation()}>
+          <div className="px-5 py-4 border-b border-slate-700/50 bg-[#1a2332] flex items-center justify-between">
+            <div>
+              <h3 className="text-white">Select Engineer</h3>
+              <p className="text-xs text-slate-400 uppercase tracking-[0.15em] mt-0.5">Available team members</p>
+            </div>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-slate-700/50 transition-all"
+              onClick={onClose}
+            >
+              <X className="w-5 h-5 text-white" />
+            </motion.button>
           </div>
-          <div className="p-4 max-h-[60vh] overflow-auto grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="p-5 max-h-[60vh] overflow-auto bg-[#0f1729] grid grid-cols-1 sm:grid-cols-2 gap-3">
             {engineers.map((e, i) => (
-              <button
+              <motion.button
                 key={`eng-${e._id || `idx-${i}`}`}
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.03, duration: 0.15 }}
+                whileHover={{ scale: 1.02, y: -2 }}
+                whileTap={{ scale: 0.98 }}
                 onClick={() => onPick(e)}
-                className="group text-left p-4 rounded-xl border border-black/10 hover:border-black/30 hover:shadow transition"
+                className="group text-left p-4 rounded-xl bg-[#1a2332] border border-slate-700/50 hover:border-slate-600 hover:shadow-lg transition-all"
               >
-                <div className="flex items-center justify-between">
-                  <p className="font-medium truncate">{e.firstName} {e.lastName}</p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="font-medium truncate text-white">{e.firstName} {e.lastName}</p>
                   {e.isBusy
-                    ? <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Busy</span>
-                    : <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">Available</span>}
+                    ? <span className="text-xs px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 font-medium">Busy</span>
+                    : <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-medium">Available</span>}
                 </div>
-                <p className="text-xs text-muted-foreground mt-1 truncate">{e.email}</p>
-                <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-                  <Check className="w-3 h-3" /> {Number(e.numberOfTask) || 0} active task(s)
+                <p className="text-xs text-slate-400 truncate mb-2">{e.email}</p>
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <Check className="w-3 h-3" />
+                  <span>{Number(e.numberOfTask) || 0} active task(s)</span>
                 </div>
-              </button>
+              </motion.button>
             ))}
           </div>
         </div>
@@ -579,7 +747,3 @@ function EngineerPicker({ open, onClose, engineers, onPick }) {
     </AnimatePresence>
   );
 }
-
-/* Tailwind helper (ensure this exists somewhere global):
-.field-input { @apply w-full px-3 py-3 rounded-xl border border-black/20 bg-white focus:outline-none focus:border-black transition text-sm; }
-*/

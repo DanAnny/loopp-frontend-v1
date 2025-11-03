@@ -1,14 +1,16 @@
-// frontend/src/components/layout/Shell.jsx
 import { useMemo, useState } from "react";
 import { Outlet } from "react-router-dom";
 import { useSelector } from "react-redux";
+import { motion } from "framer-motion";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
 
 /**
- * Shell layout
- * - SuperAdmin => dark gradient + glow
- * - Others     => light splash background
+ * Shell layout with consistent dark navy background
+ * - Matches all dashboard pages (#0f1729)
+ * - Modern, minimal design with subtle animations
+ * - Performance optimized without glass effects
+ * - Responsive sidebar and topbar
  */
 export default function Shell() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -16,43 +18,61 @@ export default function Shell() {
 
   const user = useSelector((s) => s.auth.user);
   const role = (user?.role || user?.accountType || "").toString().toLowerCase();
-  const isSuperAdmin = role === "superadmin";
 
   return (
-    <div className={`min-h-screen transition-colors duration-500 ${isSuperAdmin ? "text-white" : "text-gray-900"}`}>
+    <div className="min-h-screen text-white bg-[#0f1729]">
       {/* Topbar + Sidebar */}
       <Topbar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
       <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
 
-      {/* Background layers */}
-      {isSuperAdmin ? (
-        <>
-          {/* Dark gradient with glow */}
-          <div className="fixed inset-0 -z-20 bg-gradient-to-b from-[#0B0B0E] via-[#0D0D12] to-[#0B0B0E]" />
-          <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(1200px_600px_at_10%_-20%,rgba(93,95,239,.15),transparent),radial-gradient(1000px_600px_at_90%_0%,rgba(236,72,153,.12),transparent)]" />
-          {/* grid overlay (no file) */}
-          <div className="pointer-events-none fixed inset-0 -z-10 grid-overlay-dark opacity-[.08]" />
-        </>
-      ) : (
-        <>
-          {/* Light splashy gradient */}
-          <div className="fixed inset-0 -z-20 bg-gradient-to-br from-[#f9fafb] via-[#f3f4f6] to-[#e5e7eb]" />
-          {/* Accent radial splash */}
-          <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(800px_500px_at_5%_10%,rgba(59,130,246,.15),transparent),radial-gradient(700px_500px_at_95%_90%,rgba(236,72,153,.15),transparent)]" />
-          {/* grid overlay (no file) */}
-          <div className="pointer-events-none fixed inset-0 -z-10 grid-overlay-light opacity-[.06]" />
-        </>
-      )}
+      {/* Background - Consistent dark navy for all roles */}
+      <div className="fixed inset-0 -z-20 bg-[#0f1729]" />
+      
+      {/* Subtle animated orbs for visual interest */}
+      <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
+        <motion.div
+          className="absolute -top-24 -left-24 w-[800px] h-[800px] bg-gradient-to-br from-purple-600/10 via-purple-500/5 to-transparent rounded-full blur-3xl"
+          animate={{
+            scale: [1, 1.2, 1],
+            x: [0, 50, 0],
+            y: [0, 30, 0],
+            opacity: [0.1, 0.2, 0.1],
+          }}
+          transition={{
+            duration: 20,
+            repeat: Infinity,
+            ease: "easeInOut",
+          }}
+        />
+        <motion.div
+          className="absolute -bottom-24 -right-24 w-[700px] h-[700px] bg-gradient-to-tl from-pink-600/8 via-pink-500/4 to-transparent rounded-full blur-3xl"
+          animate={{
+            scale: [1, 1.3, 1],
+            x: [0, -30, 0],
+            y: [0, -50, 0],
+            opacity: [0.08, 0.15, 0.08],
+          }}
+          transition={{
+            duration: 25,
+            repeat: Infinity,
+            ease: "easeInOut",
+            delay: 2,
+          }}
+        />
+      </div>
 
       {/* Main content area */}
-      <div
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.2, duration: 0.4 }}
         className="pt-16 transition-[padding] duration-300 ease-out"
         style={{ paddingLeft: `${sidebarWidth}px` }}
       >
         <main className="p-6">
           <Outlet />
         </main>
-      </div>
+      </motion.div>
     </div>
   );
 }

@@ -27,7 +27,7 @@ export default function ConfirmSignOutModal({ open, onCancel, onConfirm, loading
           </p>
           <div className="flex gap-3">
             <button onClick={onCancel} disabled={loading}
-              className="flex-1 rounded-xl border border-black/20 px-4 py-2 hover:bg-black/5 transition disabled:opacity-50"
+              className="flex-1 rounded-xl border border-black/20 px-4 py-2 hover:bg-black/5 transition disabled:opacity-50 text-black"
             >
               Cancel
             </button>

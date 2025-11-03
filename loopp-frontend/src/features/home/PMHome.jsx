@@ -1,6 +1,7 @@
 // src/features/projects/pages/Projects.jsx
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   TriangleAlert,
   RefreshCw,
@@ -14,21 +15,21 @@ import {
   PlayCircle,
   CalendarClock,
   Users as UsersIcon,
-  Plus, // ⬅️ added
+  Plus,
+  ArrowRight,
+  Shield,
 } from "lucide-react";
 
 import * as ProjectsApi from "@/services/projects.service";
 import * as Users from "@/services/users.service";
-import CreateTaskModal from "@/features/tasks/components/CreateTaskModal"; // ⬅️ added
+import CreateTaskModal from "@/features/tasks/components/CreateTaskModal";
 
 /* -------------------------------- helpers -------------------------------- */
-// keep 'by' as-is
 const by = (k) => (a, b) => {
   const av = a?.[k], bv = b?.[k];
-  return new Date(bv || 0) - new Date(av || 0);
+  return new Date(bv || 0).getTime() - new Date(av || 0).getTime();
 };
 
-/** Accepts 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:mm...' and returns 'YYYY-MM-DD' or '' */
 const parseISODateOnly = (value) => {
   if (!value || typeof value !== "string") return "";
   const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -38,17 +39,14 @@ const parseISODateOnly = (value) => {
   return Number.isFinite(dt.getTime()) ? `${m[1]}-${m[2]}-${m[3]}` : "";
 };
 
-/** Format a YYYY-MM-DD safely for UI */
 const fmtISODate = (iso) => {
   if (!iso) return "—";
-  // render as locale date, but build from components to avoid TZ shifts
   const [y, m, d] = iso.split("-").map(Number);
   const dt = new Date(y, m - 1, d);
   if (!Number.isFinite(dt.getTime())) return "—";
-  return dt.toLocaleDateString(); // or add options if you want a specific style
+  return dt.toLocaleDateString();
 };
 
-/** Compute days left from a YYYY-MM-DD string */
 const daysLeftFromISO = (iso) => {
   if (!iso) return null;
   const [y, m, d] = iso.split("-").map(Number);
@@ -58,74 +56,35 @@ const daysLeftFromISO = (iso) => {
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 };
 
-/** Pick the operative deadline for a row:
- *  1) PM-set deadline from backend: p.taskDeadline
- *  2) Fallback: parse ISO-ish date out of the client's completionDate string
- */
 const pickDeadlineISO = (p) =>
   parseISODateOnly(p?.taskDeadline) || parseISODateOnly(p?.completionDate);
 
-/** Use this for the "Due soon" highlight */
-const closeToDeadlineISO = (iso, withinDays = 5) => {
-  const d = daysLeftFromISO(iso);
-  return d != null && d <= withinDays && d >= 0;
-};
-
-// keep status helpers as-is
+// map statuses, include "review"
 const normStatus = (s = "") => {
   const t = s.toString().toLowerCase();
+  if (t.includes("review")) return "Review";
   if (t.includes("progress")) return "In-Progress";
   if (t.includes("complete")) return "Complete";
   return "Pending";
 };
-const statusBadge = (s) => {
-  const st = normStatus(s);
-  if (st === "Pending") return "bg-yellow-500 text-white";
-  if (st === "In-Progress") return "bg-emerald-100 text-emerald-900";
-  return "bg-emerald-600/90 text-white";
-};
-const statusDot = (s) => {
-  const st = normStatus(s);
-  if (st === "Pending") return "bg-yellow-100";
-  if (st === "In-Progress") return "bg-emerald-500";
-  return "bg-emerald-700";
-};
-
-const daysLeft = (deadline) => {
-  if (!deadline) return null;
-  const end = new Date(deadline).setHours(23, 59, 59, 999);
-  const diff = end - Date.now();
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
-};
-const closeToDeadline = (deadline, withinDays = 5) => {
-  const d = daysLeft(deadline);
-  return d != null && d <= withinDays && d >= 0;
-};
 
 /* ----------------------------- main component ---------------------------- */
-export default function Projects() {
+export default function PMProjects() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [items, setItems] = useState([]);
-
-  // engineers map for name lookup
   const [engMap, setEngMap] = useState({});
-
-  // filters
   const [q, setQ] = useState("");
-  const [tab, setTab] = useState("all"); // all | pending | inprogress | complete
+  const [tab, setTab] = useState("all");
+  const [showCreateTask, setShowCreateTask] = useState(false);
 
-  // modal
-  const [showCreateTask, setShowCreateTask] = useState(false); // ⬅️ added
-
-  // load data
   const load = async () => {
     setLoading(true);
     setErr("");
     try {
       const [pRes, eRes] = await Promise.all([
-        ProjectsApi.getAll(),     // { success, projects: [...] }
-        Users.getEngineers(),     // { success, engineers: [...] }
+        ProjectsApi.getAll(),
+        Users.getEngineers(),
       ]);
 
       const list = Array.isArray(pRes?.data?.projects)
@@ -142,7 +101,10 @@ export default function Projects() {
 
       const map = {};
       engineers.forEach((u) => {
-        map[String(u._id)] = `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email || "Engineer";
+        map[String(u._id)] =
+          `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() ||
+          u.email ||
+          "Engineer";
       });
       setEngMap(map);
 
@@ -161,27 +123,37 @@ export default function Projects() {
 
   const stats = useMemo(() => {
     const total = items.length;
-    let pending = 0, inprog = 0, complete = 0, dueSoon = 0, overdue = 0, withEng = 0, noEng = 0;
-    const seenEng = new Set();
+    let pending = 0,
+      inprog = 0,
+      complete = 0,
+      review = 0,
+      dueSoon = 0,
+      overdue = 0,
+      withEng = 0,
+      noEng = 0;
 
     for (const p of items) {
       const st = normStatus(p.status);
+
+      // status tallies
       if (st === "Pending") pending++;
       else if (st === "In-Progress") inprog++;
-      else complete++;
+      else if (st === "Complete") complete++;
+      else if (st === "Review") review++;
 
-      const dl = daysLeft(p.completionDate);
-      if (dl != null) {
-        if (dl < 0) overdue++;
-        else if (dl <= 5) dueSoon++;
+      // Due Soon / Overdue must ignore completed
+      if (st !== "Complete") {
+        const deadlineISO = pickDeadlineISO(p);
+        const dleft = daysLeftFromISO(deadlineISO);
+        if (dleft != null) {
+          if (dleft < 0) overdue++;
+          else if (dleft <= 5) dueSoon++;
+        }
       }
 
-      if (p.engineerAssigned) {
-        withEng++;
-        seenEng.add(String(p.engineerAssigned));
-      } else {
-        noEng++;
-      }
+      // engineer assignment counts (kept for Unassigned card)
+      if (p.engineerAssigned) withEng++;
+      else noEng++;
     }
 
     return {
@@ -189,32 +161,30 @@ export default function Projects() {
       pending,
       inprog,
       complete,
-      dueSoon,
-      overdue,
+      review,     // NEW
+      dueSoon,    // updated rule
+      overdue,    // updated rule
       withEng,
       noEng,
-      uniqueEngineers: seenEng.size,
     };
   }, [items]);
 
   const filtered = useMemo(() => {
     const base = items.filter((p) => {
-      // text search
       const needle = q.trim().toLowerCase();
       if (!needle) return true;
-      const hay =
-        [
-          p.projectTitle,
-          p.projectDescription,
-          p.firstName,
-          p.lastName,
-          p.email,
-          p.status,
-          engMap[String(p.engineerAssigned)] || "",
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
+      const hay = [
+        p.projectTitle,
+        p.projectDescription,
+        p.firstName,
+        p.lastName,
+        p.email,
+        p.status,
+        engMap[String(p.engineerAssigned)] || "",
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
       return hay.includes(needle);
     });
 
@@ -225,183 +195,286 @@ export default function Projects() {
   }, [items, q, tab, engMap]);
 
   return (
-    <div className="min-h-[calc(100vh-64px)] p-4 md:p-6 text-foreground">
-      {/* title + actions */}
-      <div className="mb-4 md:mb-6 flex flex-col md:flex-row md:items-end gap-3 justify-between">
-        <div>
-          <div className="inline-flex items-center gap-2 bg-black text-white px-3 py-1 rounded-full text-xs mb-2">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            PM Projects
+    <div className="min-h-screen bg-[#0f1729] px-6 py-8">
+      <div className="max-w-[1600px] mx-auto">
+        {/* Header */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-col lg:flex-row lg:items-center justify-between mb-8 gap-4"
+        >
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                <Shield className="w-6 h-6 text-white" />
+              </div>
+              <h1 className="text-3xl text-white">Projects</h1>
+            </div>
+            <p className="text-slate-400 text-sm flex items-center gap-2">
+              <Clock className="w-4 h-4" />
+              Manage requests, assignments, and deliverables
+            </p>
           </div>
-          <h1 className="text-2xl md:text-3xl font-semibold">Projects</h1>
-          <p className="text-sm text-muted-foreground">Your assigned requests, status, deadlines, and engineers.</p>
+
+          <div className="flex items-center gap-3 flex-wrap">
+            <button
+              onClick={load}
+              disabled={loading}
+              className="bg-[#1a2332] text-white px-4 py-2.5 rounded-lg text-sm border border-slate-700/50 hover:bg-[#1f2937] transition-colors inline-flex items-center gap-2"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowCreateTask(true)}
+              className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-2.5 rounded-lg text-sm hover:from-purple-500 hover:to-pink-500 transition-all inline-flex items-center gap-2 font-medium"
+            >
+              <Plus className="w-4 h-4" />
+              Create Task
+            </motion.button>
+          </div>
+        </motion.div>
+
+        {/* Error */}
+        {err && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-200 text-sm flex items-center gap-2"
+          >
+            <TriangleAlert className="w-4 h-4" />
+            {err}
+          </motion.div>
+        )}
+
+        {/* Top Stats - 4 cards (no percentages) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+          <StatCard
+            label="Total Projects"
+            value={stats.total}
+            subtitle="All time"
+            icon={<FolderKanban className="w-5 h-5" />}
+            iconBg="bg-gradient-to-br from-purple-500 to-purple-600"
+            delay={0.1}
+            loading={loading}
+          />
+          <StatCard
+            label="Pending"
+            value={stats.pending}
+            subtitle="Awaiting action"
+            icon={<Hourglass className="w-5 h-5" />}
+            iconBg="bg-gradient-to-br from-amber-500 to-amber-600"
+            delay={0.15}
+            loading={loading}
+          />
+          <StatCard
+            label="In Progress"
+            value={stats.inprog}
+            subtitle="Active projects"
+            icon={<PlayCircle className="w-5 h-5" />}
+            iconBg="bg-gradient-to-br from-blue-500 to-blue-600"
+            delay={0.2}
+            loading={loading}
+          />
+          <StatCard
+            label="Complete"
+            value={stats.complete}
+            subtitle="Finished projects"
+            icon={<CheckCircle2 className="w-5 h-5" />}
+            iconBg="bg-gradient-to-br from-emerald-500 to-emerald-600"
+            delay={0.25}
+            loading={loading}
+          />
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+        {/* Additional Stats — Overdue/Due Soon ignore Complete, Assigned -> Review */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+          <StatCard
+            label="Due Soon"
+            value={stats.dueSoon}
+            subtitle="≤5 days (open)"
+            icon={<CalendarClock className="w-5 h-5" />}
+            iconBg="bg-gradient-to-br from-orange-500 to-orange-600"
+            delay={0.3}
+            loading={loading}
+          />
+          <StatCard
+            label="Overdue"
+            value={stats.overdue}
+            subtitle="Past deadline (open)"
+            icon={<TriangleAlert className="w-5 h-5" />}
+            iconBg="bg-gradient-to-br from-red-500 to-red-600"
+            delay={0.35}
+            loading={loading}
+          />
+          <StatCard
+            label="Review"
+            value={stats.review}
+            subtitle="Awaiting approval"
+            icon={<UsersIcon className="w-5 h-5" />}
+            iconBg="bg-gradient-to-br from-teal-500 to-teal-600"
+            delay={0.4}
+            loading={loading}
+          />
+          <StatCard
+            label="Unassigned"
+            value={stats.noEng}
+            subtitle="Need assignment"
+            icon={<User className="w-5 h-5" />}
+            iconBg="bg-gradient-to-br from-slate-500 to-slate-600"
+            delay={0.45}
+            loading={loading}
+          />
+        </div>
+
+        {/* Search & Tabs */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+          className="mb-6 space-y-4"
+        >
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search projects…"
-              className="pl-9 pr-3 py-2.5 rounded-xl border border-black/20 bg-white outline-none focus:border-black"
+              placeholder="Search projects, clients, engineers..."
+              className="w-full pl-12 pr-6 py-3 bg-[#1a2332] border border-slate-700/50 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-slate-600 transition-colors"
             />
           </div>
 
-          {/* Create Task button */}
-          <button
-            onClick={() => setShowCreateTask(true)}
-            className="inline-flex items-center gap-2 px-3 py-2.5 rounded-xl bg-black text-white hover:bg-black/90"
-            title="Create Task"
-          >
-            <Plus className="w-4 h-4" />
-            Create Task
-          </button>
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            <Tab label="All" active={tab === "all"} onClick={() => setTab("all")} count={stats.total} />
+            <Tab label="Pending" active={tab === "pending"} onClick={() => setTab("pending")} count={stats.pending} />
+            <Tab label="In Progress" active={tab === "inprogress"} onClick={() => setTab("inprogress")} count={stats.inprog} />
+            <Tab label="Complete" active={tab === "complete"} onClick={() => setTab("complete")} count={stats.complete} />
+          </div>
+        </motion.div>
 
-          <button
-            onClick={load}
-            className="inline-flex items-center gap-2 px-3 py-2.5 rounded-xl border border-black/20 hover:bg-black/[0.03]"
-          >
-            <RefreshCw className="w-4 h-4" /> Refresh
-          </button>
-        </div>
-      </div>
-
-      {/* KPI cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
-        <KPICard title="Total Projects" value={stats.total} icon={<FolderKanban className="w-4 h-4" />} />
-        <KPICard title="Pending" value={stats.pending} chip="Pending" chipClass="bg-yellow-500 text-white" icon={<Hourglass className="w-4 h-4" />} />
-        <KPICard title="In-Progress" value={stats.inprog} chip="Active" chipClass="bg-emerald-100 text-emerald-900" icon={<PlayCircle className="w-4 h-4" />} />
-        <KPICard title="Complete" value={stats.complete} chip="Done" chipClass="bg-emerald-600/90 text-white" icon={<CheckCircle2 className="w-4 h-4" />} />
-        <KPICard title="Due Soon (≤5d)" value={stats.dueSoon} icon={<CalendarClock className="w-4 h-4" />} />
-        <KPICard title="Overdue" value={stats.overdue} chip="Attention" chipClass="bg-red-800 text-white" icon={<TriangleAlert className="w-4 h-4" />} />
-        <KPICard title="With Engineer" value={stats.withEng} sub={`${stats.uniqueEngineers} unique`} icon={<UsersIcon className="w-4 h-4" />} />
-        <KPICard title="Unassigned" value={stats.noEng} icon={<User className="w-4 h-4" />} />
-      </div>
-
-      {/* filter tabs */}
-      <div className="mb-4 flex gap-2 overflow-x-auto pb-1">
-        <Tab label="All" active={tab === "all"} onClick={() => setTab("all")} />
-        <Tab label="Pending" active={tab === "pending"} onClick={() => setTab("pending")} />
-        <Tab label="In-Progress" active={tab === "inprogress"} onClick={() => setTab("inprogress")} />
-        <Tab label="Complete" active={tab === "complete"} onClick={() => setTab("complete")} />
-      </div>
-
-      {/* Desktop table */}
-      <div className="hidden lg:block">
-        <div className="rounded-2xl border border-black/10 bg-white shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <div className="max-h-[70vh] overflow-y-auto">
-              <table className="w-full border-collapse text-sm">
-                <thead className="sticky top-0 bg-white z-10 shadow-[0_1px_0_rgba(0,0,0,0.06)]">
-                  <tr className="text-left text-neutral-500">
-                    <Th w="24%">Project</Th>
-                    <Th w="18%">Client</Th>
-                    <Th w="18%">Engineer</Th>
-                    <Th w="14%">Status</Th>
-                    <Th w="14%">
-                      <div className="inline-flex items-center gap-2">
-                        <Calendar className="w-4 h-4" /> Deadline
-                      </div>
-                    </Th>
-                    <Th w="12%">Updated</Th>
-                    <Th w="8%"></Th>
+        {/* Projects Table/List */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.6 }}
+          className="bg-white rounded-2xl shadow-sm overflow-hidden"
+        >
+          {/* Desktop Table */}
+          <div className="hidden lg:block overflow-x-auto">
+            <div className="max-h-[65vh] overflow-y-auto">
+              <table className="w-full">
+                <thead className="sticky top-0 bg-slate-900 text-white z-10">
+                  <tr className="text-left">
+                    <Th>Project</Th>
+                    <Th>Client</Th>
+                    <Th>Engineer</Th>
+                    <Th>Status</Th>
+                    <Th>Deadline</Th>
+                    <Th>Updated</Th>
+                    <Th></Th>
                   </tr>
                 </thead>
-
-                <tbody className="[&>tr:nth-child(even)]:bg-neutral-50/50">
+                <tbody className="bg-white">
                   {loading ? (
                     <SkeletonRows rows={8} cols={7} />
                   ) : filtered.length ? (
-                    filtered.map((p) => {
-                      const engName =
-                        (p.engineerAssigned && engMap[String(p.engineerAssigned)]) ||
-                        (p.engineerAssigned ? "Unknown engineer" : "Unassigned");
-                      const st = normStatus(p.status);
+                    <AnimatePresence mode="popLayout">
+                      {filtered.map((p, idx) => {
+                        const engName =
+                          (p.engineerAssigned && engMap[String(p.engineerAssigned)]) || "Unassigned";
+                        const st = normStatus(p.status);
+                        const deadlineISO = pickDeadlineISO(p);
 
-                      // 👇 use PM deadline first, fallback to parsed client date
-                      const deadlineISO = pickDeadlineISO(p);
-                      const dleft = daysLeftFromISO(deadlineISO);
-                      const dlSoon = closeToDeadlineISO(deadlineISO, 5);
+                        // 🔒 STOP COUNTING when Complete
+                        const dleftRaw = daysLeftFromISO(deadlineISO);
+                        const dleft = st === "Complete" ? null : dleftRaw;
+                        const isOverdue = dleft !== null && dleft < 0;
+                        const dlSoon = dleft !== null && dleft <= 5 && dleft >= 0;
 
-                      return (
-                        <tr key={p._id} className="border-b last:border-0 border-black/10 hover:bg-black/[0.02] transition-colors">
-                          {/* Project */}
-                          <Td>
-                            <div className="font-medium text-foreground truncate">
-                              {p.projectTitle || "Untitled Project"}
-                            </div>
-                            <div className="text-xs text-muted-foreground truncate">
-                              {p.projectDescription || "—"}
-                            </div>
-                          </Td>
-
-                          {/* Client */}
-                          <Td>
-                            <div className="truncate">
-                              {`${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || "—"}
-                            </div>
-                            <div className="text-xs text-muted-foreground truncate">
-                              {p.email || "—"}
-                            </div>
-                          </Td>
-
-                          {/* Engineer */}
-                          <Td>
-                            <div className="inline-flex items-center gap-2 min-w-0">
-                              <User className="w-4 h-4 text-muted-foreground shrink-0" />
-                              <span className="truncate">{engName}</span>
-                            </div>
-                          </Td>
-
-                          {/* Status */}
-                          <Td>
-                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium ${statusBadge(st)}`}>
-                              <span className={`h-1.5 w-1.5 rounded-full ${statusDot(st)}`} />
-                              {st}
-                            </span>
-                          </Td>
-
-                          {/* Deadline */}
-                          <Td>
-                            <div className="inline-flex items-center gap-2">
-                              <Calendar className="w-4 h-4 text-muted-foreground" />
-                              <span className={`truncate ${dlSoon ? "font-semibold" : ""}`}>
-                                {fmtISODate(deadlineISO)}
-                              </span>
-                            </div>
-                            {typeof dleft === "number" && (
-                              <div className={`text-[11px] ${dleft < 0 ? "text-red-600" : "text-muted-foreground"}`}>
-                                {dleft < 0 ? `${Math.abs(dleft)} day(s) overdue` : `${dleft} day(s) left`}
+                        return (
+                          <motion.tr
+                            key={p._id}
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 20 }}
+                            transition={{ delay: idx * 0.03 }}
+                            className="border-b border-slate-100 hover:bg-slate-50 transition-all"
+                          >
+                            <Td>
+                              <div className="font-medium text-slate-900">{p.projectTitle || "Untitled"}</div>
+                              <div className="text-sm text-slate-500 truncate max-w-xs">{p.projectDescription || "—"}</div>
+                            </Td>
+                            <Td>
+                              <div className="text-slate-900">{`${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || "—"}</div>
+                              <div className="text-sm text-slate-500">{p.email || "—"}</div>
+                            </Td>
+                            <Td>
+                              <div className="flex items-center gap-2">
+                                <User className="w-4 h-4 text-slate-400" />
+                                <span className={p.engineerAssigned ? "text-slate-900" : "text-slate-400 italic"}>{engName}</span>
                               </div>
-                            )}
-                          </Td>
-
-                          {/* Updated */}
-                          <Td>
-                            <div className="inline-flex items-center gap-2">
-                              <Clock className="w-4 h-4 text-muted-foreground" />
-                              {/* updatedAt/createdAt are ISO strings from Mongo; render safely */}
-                              <span className="truncate">{fmtISODate(parseISODateOnly(p.updatedAt || p.createdAt))}</span>
-                            </div>
-                          </Td>
-
-                          {/* Actions */}
-                          <Td align="right">
-                            <Link
-                              to="/chat"
-                              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-black/20 hover:bg-black/[0.03]"
-                            >
-                              Open
-                            </Link>
-                          </Td>
-                        </tr>
-                      );
-                    })
+                            </Td>
+                            <Td>
+                              <StatusBadge status={st} />
+                            </Td>
+                            <Td>
+                              <div className="flex items-center gap-2">
+                                <Calendar className="w-4 h-4 text-slate-400" />
+                                <span
+                                  className={`${
+                                    st === "Complete"
+                                      ? "text-slate-900"
+                                      : isOverdue
+                                      ? "text-red-600 font-medium"
+                                      : dlSoon
+                                      ? "text-orange-600 font-medium"
+                                      : "text-slate-900"
+                                  }`}
+                                >
+                                  {fmtISODate(deadlineISO)}
+                                </span>
+                              </div>
+                              {/* Only show countdown if NOT complete */}
+                              {typeof dleft === "number" && (
+                                <div
+                                  className={`text-xs ${
+                                    isOverdue
+                                      ? "text-red-600 font-medium"
+                                      : dlSoon
+                                      ? "text-orange-600"
+                                      : "text-slate-500"
+                                  }`}
+                                >
+                                  {isOverdue ? `${Math.abs(dleft)}d overdue` : `${dleft}d left`}
+                                </div>
+                              )}
+                            </Td>
+                            <Td>
+                              <div className="flex items-center gap-2 text-slate-600">
+                                <Clock className="w-4 h-4 text-slate-400" />
+                                {fmtISODate(parseISODateOnly(p.updatedAt || p.createdAt))}
+                              </div>
+                            </Td>
+                            <Td align="right">
+                              <Link
+                                to="/chat"
+                                className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 text-white hover:bg-slate-800 transition-all text-sm rounded-lg group shadow-sm"
+                              >
+                                Open
+                                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                              </Link>
+                            </Td>
+                          </motion.tr>
+                        );
+                      })}
+                    </AnimatePresence>
                   ) : (
                     <tr>
-                      <td colSpan={7} className="py-16 text-center text-sm text-muted-foreground">
-                        No projects match your filters.
+                      <td colSpan={7} className="py-20 text-center text-slate-400">
+                        No projects match your filters
                       </td>
                     </tr>
                   )}
@@ -409,167 +482,172 @@ export default function Projects() {
               </table>
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* Mobile / tablet cards (restored) */}
-      <div className="lg:hidden space-y-3">
-        {loading ? (
-          <CardSkeleton count={5} />
-        ) : filtered.length ? (
-          filtered.map((p) => {
-            const engName =
-              (p.engineerAssigned && engMap[String(p.engineerAssigned)]) ||
-              (p.engineerAssigned ? "Unknown engineer" : "Unassigned");
-            const status = normStatus(p.status);
-            const deadlineISO = pickDeadlineISO(p);
-            const dlSoon = closeToDeadlineISO(deadlineISO, 5);
-            const dleft = daysLeftFromISO(deadlineISO);
+          {/* Mobile Cards */}
+          <div className="lg:hidden p-4 space-y-4 max-h-[65vh] overflow-y-auto">
+            {loading ? (
+              <CardSkeleton count={5} />
+            ) : filtered.length ? (
+              <AnimatePresence mode="popLayout">
+                {filtered.map((p, idx) => {
+                  const engName =
+                    (p.engineerAssigned && engMap[String(p.engineerAssigned)]) || "Unassigned";
+                  const status = normStatus(p.status);
+                  const deadlineISO = pickDeadlineISO(p);
 
-            return (
-              <div key={p._id} className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-semibold">{p.projectTitle || "Untitled Project"}</div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      {p.projectDescription || "—"}
-                    </div>
-                  </div>
-                  <span className={`px-2 py-1 rounded-lg text-[11px] inline-flex items-center gap-1.5 ${statusBadge(status)}`}>
-                    <span className={`h-1.5 w-1.5 rounded-full ${statusDot(status)}`} />
-                    {status}
-                  </span>
-                </div>
+                  // 🔒 STOP COUNTING when Complete
+                  const dleftRaw = daysLeftFromISO(deadlineISO);
+                  const dleft = status === "Complete" ? null : dleftRaw;
+                  const isOverdue = dleft !== null && dleft < 0;
+                  const dlSoon = dleft !== null && dleft <= 5 && dleft >= 0;
 
-                <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                  <Info label="Client" value={`${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || "—"} />
-                  <Info label="Engineer" value={engName} />
-                  <Info
-                    label="Deadline"
-                    value={
-                      <span className={dlSoon ? "font-semibold" : ""}>
-                        {fmtISODate(deadlineISO)}
-                        {typeof dleft === "number"
-                          ? ` · ${dleft < 0 ? `${Math.abs(dleft)}d overdue` : `${dleft}d left`}`
-                          : ""}
-                      </span>
-                    }
-                  />
+                  return (
+                    <motion.div
+                      key={p._id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -20 }}
+                      transition={{ delay: idx * 0.05 }}
+                      className="rounded-xl bg-slate-50 border border-slate-200 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-4 mb-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-slate-900 mb-1">{p.projectTitle || "Untitled"}</div>
+                          <div className="text-sm text-slate-500 line-clamp-2">{p.projectDescription || "—"}</div>
+                        </div>
+                        <StatusBadge status={status} />
+                      </div>
 
-                  <Info
-                    label="Updated"
-                    value={fmtISODate(parseISODateOnly(p.updatedAt || p.createdAt))}
-                  />
-                </div>
+                      <div className="grid grid-cols-2 gap-3 text-sm mb-4">
+                        <Info label="Client" value={`${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || "—"} />
+                        <Info label="Engineer" value={engName} />
+                        <Info
+                          label="Deadline"
+                          value={
+                            <span
+                              className={`${
+                                status === "Complete"
+                                  ? ""
+                                  : isOverdue
+                                  ? "text-red-600 font-medium"
+                                  : dlSoon
+                                  ? "text-orange-600 font-medium"
+                                  : ""
+                              }`}
+                            >
+                              {fmtISODate(deadlineISO)}
+                              {/* Only append countdown when NOT complete */}
+                              {typeof dleft === "number" &&
+                                ` · ${isOverdue ? `${Math.abs(dleft)}d over` : `${dleft}d left`}`}
+                            </span>
+                          }
+                        />
+                        <Info label="Updated" value={fmtISODate(parseISODateOnly(p.updatedAt || p.createdAt))} />
+                      </div>
 
-                <div className="mt-3 flex justify-end">
-                  <Link
-                    to="/chat"
-                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-black/20 hover:bg-black/[0.03]"
-                  >
-                    Open
-                  </Link>
-                </div>
+                      <Link
+                        to="/chat"
+                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 text-white hover:bg-slate-800 transition-all rounded-lg group"
+                      >
+                        Open Project
+                        <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                      </Link>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+            ) : (
+              <div className="py-20 text-center text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
+                No projects match your filters
               </div>
-            );
-          })
-        ) : (
-          <div className="py-16 text-center text-sm text-muted-foreground">
-            No projects match your filters.
+            )}
           </div>
-        )}
+        </motion.div>
       </div>
 
-      {/* errors */}
-      {err && (
-        <div className="mt-4 px-4 py-3 rounded-xl border border-red-200 bg-red-50 text-red-700 flex items-center gap-2">
-          <TriangleAlert className="w-4 h-4" /> {err}
-        </div>
-      )}
-
-      {/* ⬇️ Create Task Modal wired in */}
-      <CreateTaskModal
-        open={showCreateTask}
-        onClose={() => setShowCreateTask(false)}
-        onCreated={load}
-      />
+      <CreateTaskModal open={showCreateTask} onClose={() => setShowCreateTask(false)} onCreated={load} />
     </div>
   );
 }
 
-/* --------------------------------- atoms --------------------------------- */
-function KPICard({ title, value, sub, icon, chip, chipClass }) {
+/* --------------------------------- Components --------------------------------- */
+function StatCard({ label, value, subtitle, icon, iconBg, delay, loading }) {
+  if (loading) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay }}
+        className="h-32 rounded-xl bg-[#1a2332] animate-pulse"
+      />
+    );
+  }
+
   return (
-    <div className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm overflow-hidden">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="text-xs text-muted-foreground">{title}</div>
-
-          {/* Value on its own line, tight line-height prevents overflow */}
-          <div className="mt-1 text-2xl font-semibold leading-none truncate">
-            {value ?? 0}
-          </div>
-
-          {/* Chip sits on its own row, never overlaps value */}
-          {chip && (
-            <div className="mt-2">
-              <span
-                className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] ${chipClass || "bg-black text-white"}`}
-              >
-                {chip}
-              </span>
-            </div>
-          )}
-
-          {sub && <div className="mt-1 text-[11px] text-muted-foreground truncate">{sub}</div>}
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay }}
+      whileHover={{ y: -4, scale: 1.02 }}
+      className="bg-[#1a2332] rounded-xl p-5 border border-slate-700/30 shadow-lg shadow-black/5 hover:shadow-xl hover:shadow-black/10 transition-all"
+    >
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex-1">
+          <div className="text-slate-400 text-sm mb-1">{label}</div>
+          <div className="text-white text-3xl mb-1">{value ?? 0}</div>
+          <div className="text-slate-500 text-xs">{subtitle}</div>
         </div>
-
-        <div className="h-9 w-9 rounded-xl bg-black/5 grid place-items-center text-black shrink-0">
+        <div className={`w-12 h-12 rounded-xl ${iconBg} flex items-center justify-center text-white shadow-lg`}>
           {icon}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
-function Tab({ label, active, onClick }) {
+function Tab({ label, active, onClick, count }) {
   return (
     <button
       onClick={onClick}
-      className={`px-3.5 py-2 rounded-xl text-sm transition ${
-        active ? "bg-black text-white shadow-sm" : "border border-black/15 hover:bg-black/[0.03]"
+      className={`relative px-6 py-3 rounded-lg text-sm transition-all whitespace-nowrap ${
+        active
+          ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-sm"
+          : "bg-[#1a2332] border border-slate-700/50 text-slate-300 hover:text-white hover:bg-[#1f2937]"
       }`}
     >
       {label}
+      {count !== undefined && <span className={`ml-2 text-xs ${active ? "opacity-80" : "opacity-60"}`}>({count})</span>}
     </button>
   );
 }
 
-/* basic table cell helpers */
-function Th({ children, w }) {
-  return (
-    <th style={w ? { width: w } : undefined} className="px-4 py-3 font-semibold uppercase tracking-wide text-[11px]">
-      {children}
-    </th>
-  );
+function StatusBadge({ status }) {
+  if (status === "Complete")
+    return <span className="inline-flex items-center px-3 py-1.5 text-xs rounded-lg bg-emerald-100 text-emerald-700 border border-emerald-300 font-medium">Complete</span>;
+  if (status === "In-Progress")
+    return <span className="inline-flex items-center px-3 py-1.5 text-xs rounded-lg bg-blue-100 text-blue-700 border border-blue-300 font-medium">In Progress</span>;
+  if (status === "Review")
+    return <span className="inline-flex items-center px-3 py-1.5 text-xs rounded-lg bg-teal-100 text-teal-700 border border-teal-300 font-medium">Review</span>;
+  return <span className="inline-flex items-center px-3 py-1.5 text-xs rounded-lg bg-amber-100 text-amber-700 border border-amber-300 font-medium">Pending</span>;
 }
+
+function Th({ children }) {
+  return <th className="px-5 py-4 text-left text-xs uppercase tracking-[0.15em] text-white">{children}</th>;
+}
+
 function Td({ children, align = "left" }) {
-  return (
-    <td className={`px-4 py-4 align-middle ${align === "right" ? "text-right" : "text-left"}`}>
-      {children}
-    </td>
-  );
+  return <td className={`px-5 py-4 align-middle ${align === "right" ? "text-right" : ""}`}>{children}</td>;
 }
 
 function SkeletonRows({ rows = 6, cols = 6 }) {
   return (
     <>
       {Array.from({ length: rows }).map((_, i) => (
-        <tr key={i} className="border-b border-black/10">
+        <tr key={i} className="border-b border-slate-100">
           {Array.from({ length: cols }).map((__, j) => (
-            <td key={j} className="px-4 py-4">
-              <div className="h-4 w-28 bg-gray-200 rounded animate-pulse" />
-            </td>
+            <Td key={j}>
+              <div className="h-4 bg-slate-100 rounded animate-pulse" />
+            </Td>
           ))}
         </tr>
       ))}
@@ -577,29 +655,29 @@ function SkeletonRows({ rows = 6, cols = 6 }) {
   );
 }
 
-function CardSkeleton({ count = 5 }) {
+function CardSkeleton({ count = 3 }) {
   return (
     <>
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm">
-          <div className="h-5 w-40 bg-gray-200 rounded animate-pulse" />
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <div className="h-4 w-24 bg-gray-200 rounded animate-pulse" />
-            <div className="h-4 w-24 bg-gray-200 rounded animate-pulse" />
-            <div className="h-4 w-24 bg-gray-200 rounded animate-pulse" />
-            <div className="h-4 w-24 bg-gray-200 rounded animate-pulse" />
+        <div key={i} className="rounded-xl bg-slate-50 border border-slate-200 p-4">
+          <div className="h-6 bg-slate-200 rounded mb-4 animate-pulse" />
+          <div className="h-4 bg-slate-200 rounded mb-6 animate-pulse" />
+          <div className="grid grid-cols-2 gap-4 mb-5">
+            <div className="h-4 bg-slate-200 rounded animate-pulse" />
+            <div className="h-4 bg-slate-200 rounded animate-pulse" />
           </div>
+          <div className="h-10 bg-slate-200 rounded animate-pulse" />
         </div>
       ))}
     </>
   );
 }
 
-function Info({ label, value, warn }) {
+function Info({ label, value }) {
   return (
     <div>
-      <div className="text-[11px] text-muted-foreground">{label}</div>
-      <div className={`text-sm ${warn ? "font-semibold" : ""}`}>{value}</div>
+      <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">{label}</div>
+      <div className="text-slate-900">{value}</div>
     </div>
   );
 }

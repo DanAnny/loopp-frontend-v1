@@ -133,6 +133,138 @@ function ContextMenu({ open, x, y, items, onClose }) {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                               error overlay                                */
+/* -------------------------------------------------------------------------- */
+
+function ConnectionErrorOverlay({
+  type = "generic",
+  message = "",
+  onRefresh,
+  onRetryJoin,
+}) {
+  const isJoin = type === "join_failed";
+  const isTimeout = type === "socket_timeout";
+  const headline =
+    (isTimeout && "We lost the live connection") ||
+    (isJoin && "We couldn’t join this room") ||
+    "Something broke";
+
+  const sub =
+    (isTimeout &&
+      "Your network may be slow or temporarily unstable, so the live socket didn’t connect in time. Click to continue chatting.") ||
+    (isJoin &&
+      "We connected to the server, but joining this room failed. You can retry joining or refresh the page.") ||
+    message ||
+    "Please try again.";
+
+  return (
+    <div className="absolute inset-0 z-50 grid place-items-center bg-white/80 backdrop-blur-sm">
+      {/* Inline keyframes for the animated tools */}
+      <style>{`
+        @keyframes gear-rotate { from { transform: rotate(0deg);} to { transform: rotate(360deg);} }
+        @keyframes wrench-wiggle {
+          0%,100% { transform: rotate(-8deg) translateY(0px); }
+          50% { transform: rotate(8deg) translateY(-1px); }
+        }
+        @keyframes spark-pop {
+          0% { opacity: 0; transform: scale(0.6) translateY(4px); }
+          40% { opacity: 1; transform: scale(1) translateY(0); }
+          100% { opacity: 0; transform: scale(1.2) translateY(-3px); }
+        }
+      `}</style>
+
+      <div className="mx-4 w-full max-w-lg rounded-2xl border border-gray-200 bg-white shadow-xl p-6 text-center">
+        {/* Animated Illustration */}
+        <div className="mx-auto mb-4 h-24 w-24 relative">
+          {/* Gear */}
+          <svg
+            viewBox="0 0 100 100"
+            className="absolute inset-0 h-full w-full"
+          >
+            <g
+              style={{ transformOrigin: "50px 50px", animation: "gear-rotate 3.5s linear infinite" }}
+            >
+              <circle cx="50" cy="50" r="16" fill="#e5e7eb" />
+              {[...Array(8)].map((_, i) => {
+                const a = (i * Math.PI) / 4;
+                const x = 50 + Math.cos(a) * 28;
+                const y = 50 + Math.sin(a) * 28;
+                return (
+                  <rect
+                    key={i}
+                    x={x - 4}
+                    y={y - 8}
+                    width="8"
+                    height="16"
+                    rx="2"
+                    transform={`rotate(${(a * 180) / Math.PI} ${x} ${y})`}
+                    fill="#d1d5db"
+                  />
+                );
+              })}
+              <circle cx="50" cy="50" r="10" fill="#f3f4f6" />
+            </g>
+          </svg>
+
+          {/* Wrench */}
+          <svg
+            viewBox="0 0 120 120"
+            className="absolute -bottom-1 -right-2 h-14 w-14"
+            style={{ transformOrigin: "20px 100px", animation: "wrench-wiggle 1.6s ease-in-out infinite" }}
+          >
+            <path
+              d="M85 30a14 14 0 0 0-18 18l-30 30a8 8 0 1 0 11 11l30-30a14 14 0 0 0 7-29z"
+              fill="#9ca3af"
+            />
+            <circle cx="80" cy="34" r="4" fill="#f9fafb" />
+          </svg>
+
+          {/* Sparks */}
+          {[0, 1, 2].map((i) => (
+            <svg
+              key={i}
+              viewBox="0 0 24 24"
+              className="absolute left-1/4 top-1/4 h-4 w-4"
+              style={{
+                left: `${30 + i * 14}px`,
+                top: `${18 + (i % 2) * 10}px`,
+                animation: `spark-pop 1.2s ease-in-out ${i * 0.2}s infinite`,
+              }}
+            >
+              <path d="M12 2l2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5z" fill="#f59e0b" />
+            </svg>
+          ))}
+        </div>
+
+        <h3 className="text-lg font-semibold text-gray-900">{headline}</h3>
+        <p className="mt-1 text-sm text-gray-600">{sub}</p>
+
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+          <button
+            onClick={onRefresh}
+            className="px-4 py-2 rounded-xl bg-black text-white hover:bg-gray-800"
+          >
+            Refresh page
+          </button>
+          {isJoin && (
+            <button
+              onClick={onRetryJoin}
+              className="px-4 py-2 rounded-xl border border-gray-300 bg-white hover:bg-gray-50"
+            >
+              Retry joining room
+            </button>
+          )}
+        </div>
+
+        <div className="mt-3 text-[11px] text-gray-500">
+          Tip: If this keeps happening, check your internet connection or try switching networks.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*                                tiny helpers                                */
 /* -------------------------------------------------------------------------- */
 
@@ -563,6 +695,10 @@ export default function ClientChat() {
   const lastCountRef = useRef(0);
   const messageRefs = useRef({});
 
+  // NEW: fatal overlay state + reconnection ticker
+  const [fatal, setFatal] = useState(null); // { type: 'socket_timeout'|'join_failed'|'generic', message?:string }
+  const [reconnectTick, setReconnectTick] = useState(0);
+
   const typingText = useMemo(() => {
     if (!activeRoomId) return "";
     const map = typingByRoom[activeRoomId] || {};
@@ -639,6 +775,7 @@ export default function ClientChat() {
     (async () => {
       try {
         setErr("");
+        setFatal(null); // clear any previous fatal state before attempting
 
         const res = await fetchClientRoomMessages(activeRoomId, { limit: 100 });
         const shaped = (res?.messages || []).map(shapeForClient);
@@ -695,9 +832,35 @@ export default function ClientChat() {
           };
         }
 
-        const s = connectSocket();
-        await waitForSocketConnected(getSocket());
-        await joinSocketRoom(activeRoomId);
+        // ---- SOCKET CONNECT (catch timeout -> fatal overlay) ----
+        try {
+          const s = connectSocket();
+          await waitForSocketConnected(getSocket());
+        } catch (e) {
+          setFatal({
+            type: "socket_timeout",
+            message:
+              e?.message ||
+              "The live connection couldn’t be established before timing out.",
+          });
+          return; // stop wiring listeners
+        }
+
+        // ---- JOIN ROOM (catch failure -> fatal overlay with rejoin CTA) ----
+        try {
+          await joinSocketRoom(activeRoomId);
+        } catch (e) {
+          setFatal({
+            type: "join_failed",
+            message:
+              e?.response?.data?.message ||
+              e?.message ||
+              "We couldn’t join this chat room.",
+          });
+          return; // stop wiring listeners
+        }
+
+        const s = getSocket();
 
         // message
         const onMessage = (m) => {
@@ -958,6 +1121,7 @@ export default function ClientChat() {
         s.on("reopen:requested", onReopenRequested);
         s.on("room:pm_assigned", onPmAssigned);
       } catch (e) {
+        // fallback generic
         setErr(e?.response?.data?.message || e?.message || "Failed to load messages");
       }
     })();
@@ -977,7 +1141,8 @@ export default function ClientChat() {
       } catch {}
       unsub?.();
     };
-  }, [activeRoomId, rooms]);
+    // include reconnectTick to allow retry attempts
+  }, [activeRoomId, rooms, reconnectTick]);
 
   /* ----- ensure "You" is ONLINE when switching rooms ----- */
   useEffect(() => {
@@ -1167,7 +1332,15 @@ export default function ClientChat() {
   /* --------------------------------- render --------------------------------- */
 
   if (loading) return <div className="h-screen grid place-items-center">Loading chat…</div>;
-  if (err) return <div className="h-screen grid place-items-center text-red-600">{err}</div>;
+
+  // Keep err as a small banner rather than blocking the app;
+  // the fatal overlay handles socket/join failures.
+  // (You can still surface generic errors here if you want.)
+  const genericErrBanner = err ? (
+    <div className="px-4 py-2 text-sm text-red-700 bg-red-50 border-b border-red-200">
+      {err}
+    </div>
+  ) : null;
 
   if (!rooms.length) {
     return (
@@ -1217,8 +1390,25 @@ export default function ClientChat() {
     setUnreadCount(0);
   };
 
+  const refreshPage = () => window.location.reload();
+
+  const retryJoin = () => {
+    // Trigger the effect to re-run the whole socket/join flow
+    setReconnectTick((t) => t + 1);
+  };
+
   return (
-    <div className="h-screen flex flex-col bg-white text-black">
+    <div className="h-screen flex flex-col bg-white text-black relative">
+      {/* Fatal overlays */}
+      {fatal && (
+        <ConnectionErrorOverlay
+          type={fatal.type}
+          message={fatal.message}
+          onRefresh={refreshPage}
+          onRetryJoin={retryJoin}
+        />
+      )}
+
       {/* Fixed minimal top bar (brand/back) */}
       <div className="flex-none h-12 md:h-14 w-full border-b z-40 bg-white border-gray-200">
         <div className="h-full max-w-[1920px] mx-auto px-3 md:px-4 flex items-center justify-between">
@@ -1242,6 +1432,8 @@ export default function ClientChat() {
           </button>
         </div>
       </div>
+
+      {genericErrBanner}
 
       {/* Main Layout */}
       <div className="flex-1 flex overflow-hidden min-h-0">

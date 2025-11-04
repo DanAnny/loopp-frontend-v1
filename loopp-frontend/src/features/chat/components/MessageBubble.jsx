@@ -5,7 +5,10 @@ import {
   X,
   FileText,
   File,
+  Check,
   CheckCheck,
+  RefreshCw,
+  Loader2
 } from "lucide-react";
 import MessageContextMenu from "./MessageContextMenu";
 import { fileHref } from "../../utils/fileHref";
@@ -26,8 +29,7 @@ function ImageThumb({ url, alt }) {
       try {
         const resp = await fetch(url, { credentials: "include" });
         const ct = resp.headers.get("content-type") || "";
-        if (!resp.ok || ct.includes("text/html"))
-          throw new Error("Not authorized or bad response");
+        if (!resp.ok || ct.includes("text/html")) throw new Error("Not authorized or bad response");
         const b = await resp.blob();
         localBlobUrl = URL.createObjectURL(b);
         if (alive) setBlobUrl(localBlobUrl);
@@ -37,18 +39,13 @@ function ImageThumb({ url, alt }) {
     })();
     return () => {
       alive = false;
-      try {
-        localBlobUrl && URL.revokeObjectURL(localBlobUrl);
-      } catch {}
+      try { localBlobUrl && URL.revokeObjectURL(localBlobUrl); } catch {}
     };
   }, [url]);
 
   if (err) {
     return (
-      <div
-        className="h-32 w-32 rounded bg-red-100 text-[10px] grid place-items-center"
-        title={err}
-      >
+      <div className="h-32 w-32 rounded bg-red-100 text-[10px] grid place-items-center" title={err}>
         !
       </div>
     );
@@ -60,15 +57,12 @@ function ImageThumb({ url, alt }) {
       </div>
     );
   }
-  return (
-    <img src={blobUrl} alt={alt} className="h-32 w-32 rounded object-cover" />
-  );
+  return <img src={blobUrl} alt={alt} className="h-32 w-32 rounded object-cover" />;
 }
 
 /* -------------------------- link rendering in content ------------------------- */
 const urlRegex = /https?:\/\/[^\s)]+/gi;
-const isStripeInvoiceUrl = (u) =>
-  /(invoice\.stripe\.com\/i\/|pay\.stripe\.com\/invoice\/)/i.test(u);
+const isStripeInvoiceUrl = (u) => /(invoice\.stripe\.com\/i\/|pay\.stripe\.com\/invoice\/)/i.test(u);
 
 function shortenUrl(u) {
   try {
@@ -83,29 +77,18 @@ function shortenUrl(u) {
 }
 function labelForUrl(u) {
   if (isStripeInvoiceUrl(u))
-    return (
-      <span className="no-underline text-red-500 underline-offset-0">Pay</span>
-    );
+    return <span className="no-underline text-red-500 underline-offset-0">Pay</span>;
   return shortenUrl(u);
 }
 function renderWithLinks(text) {
   if (!text) return null;
   const parts = [];
-  let lastIndex = 0,
-    m;
+  let lastIndex = 0, m;
   while ((m = urlRegex.exec(text)) !== null) {
-    const url = m[0],
-      start = m.index;
+    const url = m[0], start = m.index;
     if (start > lastIndex) parts.push(text.slice(lastIndex, start));
     parts.push(
-      <a
-        key={`${start}-${url}`}
-        href={url}
-        target="_blank"
-        rel="noreferrer"
-        className="break-words underline"
-        title={url}
-      >
+      <a key={`${start}-${url}`} href={url} target="_blank" rel="noreferrer" className="break-words underline" title={url}>
         {labelForUrl(url)}
       </a>
     );
@@ -134,14 +117,74 @@ function normalizeAttachment(att) {
   const contentType = att.contentType || att.type || "";
   const length = typeof att.length === "number" ? att.length : undefined;
 
-  const previewUrl = hasFileId
-    ? fileHref(att.fileId, { download: false })
-    : att.url;
-  const downloadUrl = hasFileId
-    ? fileHref(att.fileId, { download: true })
-    : att.url;
+  const previewUrl = hasFileId ? fileHref(att.fileId, { download: false }) : att.url;
+  const downloadUrl = hasFileId ? fileHref(att.fileId, { download: true }) : att.url;
 
   return { filename, contentType, length, previewUrl, downloadUrl };
+}
+
+/* --------------------------- delivery status UI --------------------------- */
+function DeliveryBadge({ status, createdAtISO, onRetry }) {
+  // status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed'
+  const time = new Date(createdAtISO || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  if (status === "failed") {
+    return (
+      <div className="mt-1 mb-2 text-[10px] flex items-center gap-2 justify-end text-red-300">
+        <span>Failed • {time}</span>
+        <button
+          onClick={onRetry}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-100"
+          title="Retry send"
+        >
+          <RefreshCw className="w-3.5 h-3.5" /> Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (status === "pending") {
+    return (
+      <div className="mt-1 mb-2 text-[10px] flex items-center gap-1.5 justify-end text-white/70 whitespace-nowrap">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        <span>{time}</span>
+      </div>
+    );
+  }
+
+  if (status === "sent") {
+    return (
+      <div className="mt-1 mb-2 text-[10px] flex items-center gap-1.5 justify-end text-white/70 whitespace-nowrap">
+        <Check className="w-3.5 h-3.5 opacity-80" />
+        <span>{time}</span>
+      </div>
+    );
+  }
+
+  if (status === "delivered") {
+    return (
+      <div className="mt-1 mb-2 text-[10px] flex items-center gap-1.5 justify-end text-white/70 whitespace-nowrap">
+        <CheckCheck className="w-3.5 h-3.5 opacity-80" />
+        <span>{time}</span>
+      </div>
+    );
+  }
+
+  if (status === "read") {
+    return (
+      <div className="mt-1 mb-2 text-[10px] flex items-center gap-1.5 justify-end text-emerald-200 whitespace-nowrap">
+        <CheckCheck className="w-3.5 h-3.5" />
+        <span>{time}</span>
+      </div>
+    );
+  }
+
+  // fallback (for non-mine messages)
+  return (
+    <div className="mt-1 mb-2 text-[10px] flex items-center gap-1.5 justify-end text-black/50 whitespace-nowrap">
+      <span>{time}</span>
+    </div>
+  );
 }
 
 /* ---------------------------------- main ---------------------------------- */
@@ -150,6 +193,7 @@ export default function MessageBubble({
   highlighted = false,
   onEdit,
   onDelete,
+  onRetry, // <- added for failed resend
 }) {
   const [imgError, setImgError] = useState({});
   const [contextMenu, setContextMenu] = useState(null);
@@ -175,20 +219,14 @@ export default function MessageBubble({
       <div className="flex justify-center my-6">
         <div className="bg-yellow-50 border border-yellow-200 shadow-sm rounded-2xl px-5 py-3 max-w-lg">
           <div className="flex items-center gap-2 justify-center">
-            <svg
-              className="w-4 h-4 text-yellow-600"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
+            <svg className="w-4 h-4 text-yellow-600" fill="currentColor" viewBox="0 0 20 20">
               <path
                 fillRule="evenodd"
                 d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
                 clipRule="evenodd"
               />
             </svg>
-            <div className="text-sm font-medium text-yellow-900">
-              {message.content}
-            </div>
+            <div className="text-sm font-medium text-yellow-900">{message.content}</div>
           </div>
           <div className="text-[10px] text-yellow-700/60 text-center mt-1">
             {formatTime(message.createdAtISO)}
@@ -217,21 +255,16 @@ export default function MessageBubble({
   };
 
   /* ----------------------------- header name/role ---------------------------- */
-  const rawRole =
-    (message.senderRole || message.sender?.role || "User").toString();
+  const rawRole = (message.senderRole || message.sender?.role || "User").toString();
   const isClientRole =
     rawRole.toLowerCase() === "client" ||
     String(message.senderType || "").toLowerCase() === "client";
 
   const fullFromSender =
-    [message?.sender?.firstName, message?.sender?.lastName]
-      .filter(Boolean)
-      .join(" ")
-      .trim();
+    [message?.sender?.firstName, message?.sender?.lastName].filter(Boolean).join(" ").trim();
 
   const emailLocal =
-    (message?.clientEmail || message?.sender?.email || "")
-      .split("@")[0] || "";
+    (message?.clientEmail || message?.sender?.email || "").split("@")[0] || "";
 
   const headerName = (
     fullFromSender ||
@@ -259,11 +292,7 @@ export default function MessageBubble({
   /* --------------------------------- render --------------------------------- */
   return (
     <div
-      className={`flex flex-col mb-2 ${
-        message.isMine ? "items-end" : "items-start"
-      } group transition-all duration-300 ${
-        highlighted ? "scale-105" : ""
-      }`}
+      className={`flex flex-col mb-2 ${message.isMine ? "items-end" : "items-start"} group transition-all duration-300 ${highlighted ? "scale-105" : ""}`}
     >
       {showHeader && (
         <div className="text-[11px] mb-1 px-2 font-medium flex items-center gap-1.5 text-gray-700">
@@ -274,9 +303,7 @@ export default function MessageBubble({
       )}
 
       <div
-        className={`${theme} ${maxWidth} rounded-2xl shadow-sm ${
-          message.isMine ? "rounded-tr-md" : "rounded-tl-md"
-        } ${highlighted ? "ring-2 ring-blue-500 ring-offset-2" : ""} transition-all duration-300`}
+        className={`${theme} ${maxWidth} rounded-2xl shadow-sm ${message.isMine ? "rounded-tr-md" : "rounded-tl-md"} ${highlighted ? "ring-2 ring-blue-500 ring-offset-2" : ""} transition-all duration-300`}
         onContextMenu={handleContextMenu}
       >
         <div className="px-3 pt-2">
@@ -303,9 +330,7 @@ export default function MessageBubble({
                 <button
                   onClick={handleEditCancel}
                   className={`px-3 py-1 text-xs rounded-lg transition ${
-                    message.isMine
-                      ? "bg-white/10 hover:bg-white/20"
-                      : "bg-black/5 hover:bg-black/10"
+                    message.isMine ? "bg-white/10 hover:bg-white/20" : "bg-black/5 hover:bg-black/10"
                   }`}
                 >
                   Cancel
@@ -313,9 +338,7 @@ export default function MessageBubble({
                 <button
                   onClick={handleEditSave}
                   className={`px-3 py-1 text-xs rounded-lg transition ${
-                    message.isMine
-                      ? "bg-white/20 hover:bg-white/30"
-                      : "bg-black/10 hover:bg-black/20"
+                    message.isMine ? "bg-white/20 hover:bg-white/30" : "bg-black/10 hover:bg-black/20"
                   }`}
                 >
                   Save
@@ -324,129 +347,77 @@ export default function MessageBubble({
             </div>
           )}
 
-          {Array.isArray(message.attachments) &&
-            message.attachments.length > 0 && (
-              <div className="mt-2 space-y-2">
-                {message.attachments.map((att, idx) => {
-                  const meta = normalizeAttachment(att);
-                  const {
-                    filename,
-                    contentType,
-                    length,
-                    previewUrl,
-                    downloadUrl,
-                  } = meta;
-                  const isImage =
-                    isImageCT(contentType) ||
-                    /\.(jpg|jpeg|png|gif|webp)$/i.test(filename);
-                  const isPdf =
-                    isPdfCT(contentType) ||
-                    filename.toLowerCase().endsWith(".pdf");
+          {Array.isArray(message.attachments) && message.attachments.length > 0 && (
+            <div className="mt-2 space-y-2">
+              {message.attachments.map((att, idx) => {
+                const meta = normalizeAttachment(att);
+                const { filename, contentType, length, previewUrl, downloadUrl } = meta;
+                const isImage = isImageCT(contentType) || /\.(jpg|jpeg|png|gif|webp)$/i.test(filename);
+                const isPdf = isPdfCT(contentType) || filename.toLowerCase().endsWith(".pdf");
 
-                  if (isImage && !imgError[previewUrl]) {
-                    return (
-                      <div
-                        key={idx}
-                        className="relative group/img inline-block"
+                if (isImage && !imgError[previewUrl]) {
+                  return (
+                    <div key={idx} className="relative group/img inline-block">
+                      <a href={previewUrl} target="_blank" rel="noreferrer" className="block rounded-lg overflow-hidden" title={filename}>
+                        <ImageThumb url={previewUrl} alt={filename} />
+                      </a>
+                      <a
+                        href={downloadUrl}
+                        className="absolute top-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 rounded-full opacity-0 group-hover/img:opacity-100 transition-opacity"
+                        title="Download"
                       >
+                        <Download className="w-4 h-4 text-white" />
+                      </a>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div key={idx} className={`flex items-center gap-2 p-2 rounded-lg ${message.isMine ? "bg-white/10" : "bg-black/5"}`}>
+                    <div className={`p-1.5 rounded ${message.isMine ? "bg-white/20" : "bg-black/10"}`}>
+                      {isPdf ? <FileText className="w-4 h-4" /> : <File className="w-4 h-4" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <span className="text-xs truncate block">{filename}</span>
+                      <span className="text-[10px] opacity-70 truncate block">
+                        {contentType || "file"}
+                        {typeof length === "number" ? ` • ${(length / (1024 * 1024)).toFixed(2)} MB` : ""}
+                      </span>
+                    </div>
+                    <div className="flex gap-1">
+                      {(isPdf || isImageCT(contentType)) && (
                         <a
                           href={previewUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="block rounded-lg overflow-hidden"
-                          title={filename}
+                          className={`${message.isMine ? "hover:bg-white/20" : "hover:bg-black/10"} p-1 rounded transition`}
+                          title="Preview"
                         >
-                          <ImageThumb url={previewUrl} alt={filename} />
+                          <ExternalLink className="w-3.5 h-3.5" />
                         </a>
-                        <a
-                          href={downloadUrl}
-                          className="absolute top-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 rounded-full opacity-0 group-hover/img:opacity-100 transition-opacity"
-                          title="Download"
-                        >
-                          <Download className="w-4 h-4 text-white" />
-                        </a>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div
-                      key={idx}
-                      className={`flex items-center gap-2 p-2 rounded-lg ${
-                        message.isMine ? "bg-white/10" : "bg-black/5"
-                      }`}
-                    >
-                      <div
-                        className={`p-1.5 rounded ${
-                          message.isMine ? "bg-white/20" : "bg-black/10"
-                        }`}
+                      )}
+                      <a
+                        href={downloadUrl}
+                        className={`${message.isMine ? "hover:bg-white/20" : "hover:bg-black/10"} p-1 rounded transition`}
+                        title="Download"
                       >
-                        {isPdf ? (
-                          <FileText className="w-4 h-4" />
-                        ) : (
-                          <File className="w-4 h-4" />
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <span className="text-xs truncate block">
-                          {filename}
-                        </span>
-                        <span className="text-[10px] opacity-70 truncate block">
-                          {contentType || "file"}
-                          {typeof length === "number"
-                            ? ` • ${(length / (1024 * 1024)).toFixed(2)} MB`
-                            : ""}
-                        </span>
-                      </div>
-                      <div className="flex gap-1">
-                        {(isPdf || isImageCT(contentType)) && (
-                          <a
-                            href={previewUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className={`${
-                              message.isMine
-                                ? "hover:bg-white/20"
-                                : "hover:bg-black/10"
-                            } p-1 rounded transition`}
-                            title="Preview"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        )}
-                        <a
-                          href={downloadUrl}
-                          className={`${
-                            message.isMine
-                              ? "hover:bg-white/20"
-                              : "hover:bg-black/10"
-                          } p-1 rounded transition`}
-                          title="Download"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                        </a>
-                      </div>
+                        <Download className="w-3.5 h-3.5" />
+                      </a>
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
-          <div
-            className={`mt-1 mb-2 text-[10px] flex items-center gap-1.5 ${
-              message.isMine
-                ? "justify-end text-white/70"
-                : "justify-end text-black/50"
-            } whitespace-nowrap`}
-          >
-            {message.isEdited && (
-              <span className="italic opacity-70">edited</span>
-            )}
-            <span>{formatTime(message.createdAtISO)}</span>
-            {message.isMine && (
-              <span className="flex items-center">
-                <CheckCheck className="w-3.5 h-3.5 opacity-80" />
-              </span>
+          {/* Footer: time + delivery checks */}
+          <div className={`mt-1 mb-2 text-[10px] flex items-center gap-1.5 ${message.isMine ? "justify-end" : "justify-end"} whitespace-nowrap`}>
+            {message.isMine ? (
+              <DeliveryBadge status={message.status} createdAtISO={message.createdAtISO} onRetry={onRetry} />
+            ) : (
+              <div className={`${message.isMine ? "text-white/70" : "text-black/50"}`}>
+                {new Date(message.createdAtISO || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </div>
             )}
           </div>
         </div>

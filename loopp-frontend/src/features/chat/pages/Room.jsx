@@ -18,6 +18,45 @@ import ChatBackground from "@/features/chat/components/ChatBackground";
 import UnreadMessagesIndicator from "@/features/chat/components/UnreadMessagesIndicator";
 import InvoiceModal from "../components/InvoiceModal";
 
+// within ~Room.jsx
+
+// consider two times "close" if within N ms
+const closeInTime = (aISO, bISO, ms = 10000) => {
+  const a = new Date(aISO || Date.now()).getTime();
+  const b = new Date(bISO || Date.now()).getTime();
+  return Math.abs(a - b) <= ms;
+};
+
+// try to reconcile an echoed message that has no clientNonce with a recent optimistic one
+function reconcileMineWithoutNonce(prev, shaped) {
+  if (!shaped.isMine) return prev;
+
+  // Find the most recent optimistic "pending/sent" mine with same content
+  // and a close timestamp window — replace it instead of appending.
+  const idx = [...prev]
+    .reverse()
+    .findIndex((m) =>
+      m.isMine &&
+      (m.status === "pending" || m.status === "sent") &&
+      (m.content || "").trim() === (shaped.content || "").trim() &&
+      closeInTime(m.createdAtISO, shaped.createdAtISO, 15000) // 15s window
+    );
+
+  if (idx === -1) return prev;
+
+  const realIdx = prev.length - 1 - idx;
+  const next = prev.slice();
+  next[realIdx] = {
+    ...prev[realIdx],
+    _id: shaped._id,
+    status: "delivered",
+    deliveredAt: shaped.deliveredAt || new Date().toISOString(),
+    createdAtISO: shaped.createdAtISO || prev[realIdx].createdAtISO,
+    timestamp: shaped.timestamp || prev[realIdx].timestamp,
+  };
+  return next;
+}
+
 /* ------------------------------ unread helpers ------------------------------ */
 const UNREAD_KEY = (userId) => `CHAT_UNREAD:${userId}`;
 function getUnreadMap(userId) {
@@ -83,27 +122,28 @@ function previewText(m) {
   return m.content || "—";
 }
 
+/* --------------------------- optimistic utilities --------------------------- */
+const genClientNonce = () =>
+  Math.random().toString(36).slice(2) + "-" + Date.now().toString(36);
+
 function normalizeIncoming(m, meId, dir = {}) {
-  // Hide staff-only system messages from clients
+  // NOTE: never hide client-visible system messages here unless intended
+  // (Your old filter hid some System→Client; I’ll keep your logic but safer)
   if (
     String(m.senderType || "").toLowerCase() === "system" &&
     String(m.visibleTo || "All") === "Client"
   ) {
-    return null;
+    // visible to Client => keep; if you intended to HIDE from Client UI only,
+    // move that condition to the render layer where you know the viewer role.
   }
 
-  // Raw sender may be missing for Client messages
   const rawSender = m.sender || m.user || {};
   const senderId = (
-    typeof rawSender === "string"
-      ? rawSender
-      : rawSender._id || rawSender.id || ""
+    typeof rawSender === "string" ? rawSender : rawSender._id || rawSender.id || ""
   ).toString();
 
-  // Directory lookup if we only have an id
   const lookup = (senderId && dir[senderId]) ? dir[senderId] : {};
 
-  // pull name/email from message for Clients
   const clientName  = (m.clientName || "").toString().trim();
   const clientEmail = (m.clientEmail || "").toString().trim();
 
@@ -111,10 +151,7 @@ function normalizeIncoming(m, meId, dir = {}) {
   const last  = (rawSender.lastName  ?? lookup.lastName  ?? "").toString().trim();
 
   const email = (
-    rawSender.email ??
-    lookup.email ??
-    clientEmail ??
-    ""
+    rawSender.email ?? lookup.email ?? clientEmail ?? ""
   ).toString().trim();
 
   const full  = [first, last].filter(Boolean).join(" ");
@@ -122,12 +159,7 @@ function normalizeIncoming(m, meId, dir = {}) {
   const username = (rawSender.username || "").toString().trim();
 
   const rawRole =
-    rawSender.role ||
-    m.senderRole ||
-    m.role ||
-    lookup.role ||
-    m.senderType ||
-    "User";
+    rawSender.role || m.senderRole || m.role || lookup.role || m.senderType || "User";
   const role = normalizeRole(rawRole);
 
   const emailLocal = email ? email.split("@")[0] : "";
@@ -168,7 +200,13 @@ function normalizeIncoming(m, meId, dir = {}) {
     clientName: clientName || undefined,
     clientEmail: clientEmail || (email && role === "Client" ? email : undefined),
 
-    attachments
+    attachments,
+
+    // delivery state – server should include if available
+    status: m.status || (isMine ? "delivered" : "delivered"), // default to delivered for server-fed messages
+    clientNonce: m.clientNonce || null,
+    deliveredAt: m.deliveredAt || null,
+    readAt: m.readAt || null
   };
 
   shaped.bubbleTheme = roleToTheme(role, isMine);
@@ -183,12 +221,53 @@ function msgSignature(m) {
     (m.content || "").slice(0, 200),
     (m.createdAtISO || "").slice(0, 19),
     String(Array.isArray(m.attachments) ? m.attachments.length : 0),
+    String(m.clientNonce || "")
   ].join("|");
 }
 function safeAppend(setMessages, incoming) {
   setMessages((prev) => {
-    const sig = msgSignature(incoming);
-    if (prev.some((x) => x._id === incoming._id || msgSignature(x) === sig)) return prev;
+    // primary: id match
+    if (prev.some((x) => x._id === incoming._id)) return prev;
+
+    // secondary: nonce match
+    if (incoming.clientNonce) {
+      const nIdx = prev.findIndex((x) => x.clientNonce && x.clientNonce === incoming.clientNonce);
+      if (nIdx !== -1) {
+        const next = prev.slice();
+        next[nIdx] = {
+          ...next[nIdx],
+          _id: incoming._id,
+          status: incoming.status || "delivered",
+          deliveredAt: incoming.deliveredAt || new Date().toISOString(),
+          createdAtISO: incoming.createdAtISO || next[nIdx].createdAtISO,
+          timestamp: incoming.timestamp || next[nIdx].timestamp,
+        };
+        return next;
+      }
+    }
+
+    // tertiary: fuzzy de-dupe for "my" messages (same text, recent time window)
+    const dupIdx = prev.findIndex(
+      (x) =>
+        x.isMine === true &&
+        incoming.isMine === true &&
+        (x.status === "pending" || x.status === "sent") &&
+        (x.content || "").trim() === (incoming.content || "").trim() &&
+        closeInTime(x.createdAtISO, incoming.createdAtISO, 15000)
+    );
+    if (dupIdx !== -1) {
+      const next = prev.slice();
+      next[dupIdx] = {
+        ...next[dupIdx],
+        _id: incoming._id,
+        status: "delivered",
+        deliveredAt: incoming.deliveredAt || new Date().toISOString(),
+        createdAtISO: incoming.createdAtISO || next[dupIdx].createdAtISO,
+        timestamp: incoming.timestamp || next[dupIdx].timestamp,
+      };
+      return next;
+    }
+
     return [...prev, incoming];
   });
 }
@@ -254,24 +333,19 @@ const toConversation = (typingByRoom) => (r) => {
 function ErrorScreen({ kind, title, message, onRefresh, onRetry, retryLabel = "Try Again" }) {
   return (
     <div className="h-screen w-full flex flex-col items-center justify-center bg-gradient-to-b from-gray-50 to-white px-6 text-center">
-      {/* Animated “engineer tools” scene */}
       <div className="relative mb-6">
-        {/* Gear */}
         <svg viewBox="0 0 64 64" className="w-20 h-20 text-gray-400 animate-spin-slow" style={{ animationDuration: "6s" }}>
           <g fill="currentColor">
             <path d="M27 4h10l1.2 5.4 5.1 2.1 4.3-3.5 7.1 7.1-3.5 4.3 2.1 5.1L60 27v10l-5.4 1.2-2.1 5.1 3.5 4.3-7.1 7.1-4.3-3.5-5.1 2.1L37 60H27l-1.2-5.4-5.1-2.1-4.3 3.5-7.1-7.1 3.5-4.3-2.1-5.1L4 37V27l5.4-1.2 2.1-5.1-3.5-4.3 7.1-7.1 4.3 3.5 5.1-2.1L27 4zm5 16a12 12 0 100 24 12 12 0 000-24z"/>
           </g>
         </svg>
-        {/* Wrench */}
         <svg viewBox="0 0 64 64" className="w-20 h-20 text-gray-500 absolute -bottom-4 -right-6 animate-bounce-slow" style={{ animationDuration: "2.5s" }}>
           <path fill="currentColor" d="M50 10a10 10 0 00-9.7 7.5l6.2 6.2a3 3 0 01-4.2 4.2l-6.2-6.2A10 10 0 1050 10zM21 43l-9 9a3 3 0 004.2 4.2l9-9a10.7 10.7 0 01-4.2-4.2z"/>
         </svg>
       </div>
 
       <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">{title}</h1>
-      <p className="mt-2 max-w-xl text-sm sm:text-base text-gray-600">
-        {message}
-      </p>
+      <p className="mt-2 max-w-xl text-sm sm:text-base text-gray-600">{message}</p>
 
       <div className="mt-4 text-xs text-gray-500">
         {kind === "SOCKET_TIMEOUT" && "Hint: If you’re on a slow or flaky connection, a quick refresh usually fixes it."}
@@ -559,35 +633,67 @@ export default function Room() {
 
           const rid = String(shaped.room || activeRoomId);
 
-          setRooms((prev) => {
-            let updated = prev;
-            const idx = updated.findIndex((x) => x.id === rid);
-            if (idx !== -1) {
-              const r0 = updated[idx];
-              const r1 = {
-                ...r0,
-                lastMessage: previewText(shaped),
-                updatedAtISO: shaped.createdAtISO,
-              };
-              updated = [r1, ...updated.slice(0, idx), ...updated.slice(idx + 1)];
+          if (shaped.isMine) {
+            // 1) If we have a nonce, reconcile by nonce.
+            if (shaped.clientNonce) {
+              setMessages((prev) => {
+                const idx = prev.findIndex(
+                  (x) => x.isMine && x.clientNonce && x.clientNonce === shaped.clientNonce
+                );
+                if (idx !== -1) {
+                  const prevMsg = prev[idx];
+                  const merged = {
+                    ...prevMsg,
+                    _id: shaped._id,
+                    status: "delivered",
+                    deliveredAt: shaped.deliveredAt || new Date().toISOString(),
+                    createdAtISO: shaped.createdAtISO || prevMsg.createdAtISO,
+                    timestamp: shaped.timestamp || prevMsg.timestamp,
+                  };
+                  const next = prev.slice();
+                  next[idx] = merged;
+                  return next;
+                }
+                // fallback: fuzzy reconcile without nonce
+                return reconcileMineWithoutNonce(prev, shaped);
+              });
+            } else {
+              // no nonce at all — fuzzy reconcile
+              setMessages((prev) => reconcileMineWithoutNonce(prev, shaped));
             }
-            return updated;
-          });
+          } else {
+            // messages from others (or mine already reconciled): keep sidebar/ordering fresh
+            setRooms((prev) => {
+              let updated = prev;
+              const idx = updated.findIndex((x) => x.id === rid);
+              if (idx !== -1) {
+                const r0 = updated[idx];
+                const r1 = {
+                  ...r0,
+                  lastMessage: previewText(shaped),
+                  updatedAtISO: shaped.createdAtISO,
+                };
+                updated = [r1, ...updated.slice(0, idx), ...updated.slice(idx + 1)];
+              }
+              return updated;
+            });
 
-          if (rid !== String(activeRoomId) && !shaped.isMine) {
-            incUnread(userId, rid);
-            setRooms((prev) =>
-              prev.map((r) =>
-                r.id === rid ? { ...r, unreadCount: unreadCountFor(userId, rid) } : r
-              )
-            );
-            return;
+            if (rid !== String(activeRoomId) && !shaped.isMine) {
+              incUnread(userId, rid);
+              setRooms((prev) =>
+                prev.map((r) =>
+                  r.id === rid ? { ...r, unreadCount: unreadCountFor(userId, rid) } : r
+                )
+              );
+              return;
+            }
+
+            safeAppend(setMessages, shaped);
           }
 
-          safeAppend(setMessages, shaped);
+          // scroll behavior unchanged...
           const el = scrollerRef.current;
           if (!el) return;
-
           const atBottom = atBottomRef.current;
           if (atBottom || shaped.isMine) {
             requestAnimationFrame(() => {
@@ -613,6 +719,34 @@ export default function Room() {
           });
         };
 
+        const onDelivered = ({ messageId, clientNonce }) => {
+          // Optional: if your backend emits a dedicated delivered event
+          setMessages((prev) => {
+            const idx = prev.findIndex(
+              (m) => (clientNonce && m.clientNonce === clientNonce) || m._id === messageId
+            );
+            if (idx === -1) return prev;
+            const next = prev.slice();
+            next[idx] = { ...next[idx], status: "delivered", deliveredAt: new Date().toISOString() };
+            return next;
+          });
+        };
+
+        const onRead = ({ messageIds }) => {
+          setMessages((prev) => {
+            if (!Array.isArray(messageIds) || !messageIds.length) return prev;
+            let changed = false;
+            const next = prev.map((m) => {
+              if (messageIds.includes(m._id) && m.status !== "read") {
+                changed = true;
+                return { ...m, status: "read", readAt: new Date().toISOString() };
+              }
+              return m;
+            });
+            return changed ? next : prev;
+          });
+        };
+
         const onRated = ({ ratings }) =>
           setProject((p) => (p ? { ...p, ratings: ratings || p.ratings, hasRatings: true } : p));
 
@@ -634,6 +768,8 @@ export default function Room() {
         const s2 = getSocket();
         s2?.off("message", onMessage);
         s2?.off("typing", onTyping);
+        s2?.off("delivered", onDelivered);
+        s2?.off("read", onRead);
         s2?.off("rated", onRated);
         s2?.off("room:closed", onRoomClosed);
         s2?.off("room:reopened", onRoomReopened);
@@ -641,6 +777,8 @@ export default function Room() {
 
         s2?.on("message", onMessage);
         s2?.on("typing", onTyping);
+        s2?.on("delivered", onDelivered); // if supported by backend
+        s2?.on("read", onRead); // if supported by backend
         s2?.on("rated", onRated);
         s2?.on("room:closed", onRoomClosed);
         s2?.on("room:reopened", onRoomReopened);
@@ -753,9 +891,11 @@ export default function Room() {
     if (atBottom) setUnreadFloatCount(0);
   };
 
+  /* --------------------------- OPTIMISTIC SEND --------------------------- */
   const handleSendMessage = async (text, files = []) => {
     if (!activeRoomId || roomClosed) return;
 
+    // normalize file input
     let fileArray = [];
     if (files) {
       if (typeof FileList !== "undefined" && files instanceof FileList) {
@@ -771,10 +911,76 @@ export default function Room() {
     const hasFiles = fileArray.length > 0;
     if (!trimmed && !hasFiles) return;
 
+    const clientNonce = genClientNonce();
+    const tempId = `tmp-${clientNonce}`;
+    const createdAtISO = new Date().toISOString();
+
+    // Build optimistic message
+    const optimistic = {
+      _id: tempId,
+      room: activeRoomId,
+      content: trimmed,
+      attachments: [], // show after upload if you implement optimistic file previews
+      createdAtISO,
+      timestamp: new Date(createdAtISO).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      senderName: userName,
+      senderRole: userRole,
+      senderType: userRole,
+      isMine: true,
+      bubbleTheme: "me",
+      status: "pending",           // <- key
+      clientNonce,                 // <- reconcile key
+      deliveredAt: null,
+      readAt: null
+    };
+
+    // 1) Show immediately
+    setMessages((prev) => [...prev, optimistic]);
+
+    // 2) Scroll to bottom
+    requestAnimationFrame(() => {
+      scrollerRef.current?.scrollTo({
+        top: scrollerRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    });
+
     try {
-      await chatApi.send({ roomId: activeRoomId, text: trimmed, files: fileArray });
+      // 3) Send to server (include clientNonce so echo can reconcile)
+      await chatApi.send({ roomId: activeRoomId, text: trimmed, files: fileArray, clientNonce });
+
+      // If your backend does NOT echo the nonce, you could fallback-set "sent" here,
+      // then upgrade to "delivered" on socket echo. If it does echo, the onMessage
+      // handler above will replace this optimistic one with the real message and set 'delivered'.
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m._id === tempId);
+        if (idx === -1) return prev;
+        const next = prev.slice();
+        // Move from 'pending' → 'sent' (will become 'delivered' when echoed)
+        next[idx] = { ...next[idx], status: "sent" };
+        return next;
+      });
     } catch (e) {
+      // 4) Failure: flag as failed
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m._id === tempId);
+        if (idx === -1) return prev;
+        const next = prev.slice();
+        next[idx] = { ...next[idx], status: "failed", error: e?.response?.data?.message || e?.message || "Failed to send" };
+        return next;
+      });
       setErr(e?.response?.data?.message || e?.message || "Failed to send");
+    }
+  };
+
+  const retrySend = async (message) => {
+    if (!message || message.status !== "failed") return;
+    try {
+      setMessages((prev) => prev.map((m) => (m._id === message._id ? { ...m, status: "pending", error: undefined } : m)));
+      await chatApi.send({ roomId: message.room, text: message.content, files: [], clientNonce: message.clientNonce });
+      setMessages((prev) => prev.map((m) => (m._id === message._id ? { ...m, status: "sent" } : m)));
+    } catch (e) {
+      setMessages((prev) => prev.map((m) => (m._id === message._id ? { ...m, status: "failed", error: e?.message || "Failed again" } : m)));
     }
   };
 
@@ -1041,6 +1247,7 @@ export default function Room() {
                             <MessageBubble
                               message={m}
                               highlighted={highlightedMessageId === m._id}
+                              onRetry={() => retrySend(m)}
                             />
                           </div>
                         ))}

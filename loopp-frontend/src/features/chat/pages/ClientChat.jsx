@@ -296,6 +296,36 @@ const roleToTheme = (role, isMine) => {
   return "client";
 };
 
+// NEW: fuzzy-time helper + reconciliation for my echoed messages
+const closeInTime = (aISO, bISO, ms = 15000) => {
+  const a = new Date(aISO || Date.now()).getTime();
+  const b = new Date(bISO || Date.now()).getTime();
+  return Math.abs(a - b) <= ms;
+};
+
+function reconcileMineWithoutNonce(prev, shaped) {
+  if (!shaped.isMine) return prev;
+  const idxFromEnd = [...prev]
+    .reverse()
+    .findIndex(
+      (m) =>
+        m.isMine &&
+        (m.content || "").trim() === (shaped.content || "").trim() &&
+        closeInTime(m.createdAtISO, shaped.createdAtISO, 15000)
+    );
+  if (idxFromEnd === -1) return prev;
+  const realIdx = prev.length - 1 - idxFromEnd;
+  const next = prev.slice();
+  next[realIdx] = {
+    ...prev[realIdx],
+    _id: shaped._id,
+    createdAtISO: shaped.createdAtISO || prev[realIdx].createdAtISO,
+    timestamp: shaped.timestamp || prev[realIdx].timestamp,
+    clientNonce: shaped.clientNonce || prev[realIdx].clientNonce,
+  };
+  return next;
+};
+
 const shapeForClient = (m) => {
   const created =
     m.createdAt || m.createdAtISO || m.timestamp || new Date().toISOString();
@@ -335,6 +365,8 @@ const shapeForClient = (m) => {
     senderName,
     attachments,
     bubbleTheme: roleToTheme(role || "", mine),
+    // NEW: carry through nonce when server echoes it
+    clientNonce: m.clientNonce || m.nonce || undefined,
   };
 };
 
@@ -348,11 +380,54 @@ const msgSignature = (m) =>
     String(Array.isArray(m.attachments) ? m.attachments.length : 0),
   ].join("|");
 
+// UPDATED: smarter safeAppend with nonce + fuzzy path
 function safeAppend(setMessages, incoming) {
   setMessages((prev) => {
+    // id match
+    if (prev.some((x) => x._id === incoming._id)) return prev;
+
+    // nonce match (best)
+    if (incoming.clientNonce) {
+      const nIdx = prev.findIndex(
+        (x) => x.clientNonce && x.clientNonce === incoming.clientNonce
+      );
+      if (nIdx !== -1) {
+        const next = prev.slice();
+        next[nIdx] = {
+          ...next[nIdx],
+          _id: incoming._id,
+          createdAtISO: incoming.createdAtISO || next[nIdx].createdAtISO,
+          timestamp: incoming.timestamp || next[nIdx].timestamp,
+          clientNonce: incoming.clientNonce,
+        };
+        return next;
+      }
+    }
+
+    // fuzzy dedupe for my recent message without nonce echo
+    const dupIdx = prev.findIndex(
+      (x) =>
+        x.isMine === true &&
+        incoming.isMine === true &&
+        (x.content || "").trim() === (incoming.content || "").trim() &&
+        closeInTime(x.createdAtISO, incoming.createdAtISO, 15000)
+    );
+    if (dupIdx !== -1) {
+      const next = prev.slice();
+      next[dupIdx] = {
+        ...next[dupIdx],
+        _id: incoming._id,
+        createdAtISO: incoming.createdAtISO || next[dupIdx].createdAtISO,
+        timestamp: incoming.timestamp || next[dupIdx].timestamp,
+        clientNonce: incoming.clientNonce || next[dupIdx].clientNonce,
+      };
+      return next;
+    }
+
+    // legacy signature check (kept as last line of defense)
     const sig = msgSignature(incoming);
-    if (prev.some((x) => x._id === incoming._id || msgSignature(x) === sig))
-      return prev;
+    if (prev.some((x) => msgSignature(x) === sig)) return prev;
+
     return [...prev, incoming];
   });
 }
@@ -862,11 +937,12 @@ export default function ClientChat() {
 
         const s = getSocket();
 
-        // message
+        // message (UPDATED: nonce + fuzzy reconcile)
         const onMessage = (m) => {
           const rid = String(m.room?._id || m.room);
           const shapedMsg = shapeForClient(m);
 
+          // keep list ordering fresh
           setRooms((prev) => {
             const idx = prev.findIndex((x) => String(x.id) === rid);
             if (idx === -1) return prev;
@@ -881,7 +957,58 @@ export default function ClientChat() {
 
           if (rid !== String(activeRoomId)) return;
 
-          safeAppend(setMessages, shapedMsg);
+          // Reconcile by nonce if present, else fuzzy for "mine"
+          setMessages((prev) => {
+            // id already present?
+            if (prev.some((x) => x._id === shapedMsg._id)) return prev;
+
+            if (shapedMsg.clientNonce) {
+              const nIdx = prev.findIndex(
+                (x) => x.clientNonce && x.clientNonce === shapedMsg.clientNonce
+              );
+              if (nIdx !== -1) {
+                const next = prev.slice();
+                next[nIdx] = {
+                  ...next[nIdx],
+                  _id: shapedMsg._id,
+                  createdAtISO: shapedMsg.createdAtISO || next[nIdx].createdAtISO,
+                  timestamp: shapedMsg.timestamp || next[nIdx].timestamp,
+                  clientNonce: shapedMsg.clientNonce,
+                };
+                return next;
+              }
+            }
+
+            // fuzzy for my echoed message without nonce
+            const idxFromEnd = [...prev]
+              .reverse()
+              .findIndex(
+                (x) =>
+                  x.isMine &&
+                  shapedMsg.isMine &&
+                  (x.content || "").trim() === (shapedMsg.content || "").trim() &&
+                  closeInTime(x.createdAtISO, shapedMsg.createdAtISO, 15000)
+              );
+
+            if (idxFromEnd !== -1) {
+              const realIdx = prev.length - 1 - idxFromEnd;
+              const next = prev.slice();
+              next[realIdx] = {
+                ...next[realIdx],
+                _id: shapedMsg._id,
+                createdAtISO: shapedMsg.createdAtISO || prev[realIdx].createdAtISO,
+                timestamp: shapedMsg.timestamp || prev[realIdx].timestamp,
+                clientNonce: shapedMsg.clientNonce || prev[realIdx].clientNonce,
+              };
+              return next;
+            }
+
+            // last resort: signature
+            const sig = msgSignature(shapedMsg);
+            if (prev.some((x) => msgSignature(x) === sig)) return prev;
+
+            return [...prev, shapedMsg];
+          });
 
           if (atBottomRef.current || shapedMsg.isMine) {
             requestAnimationFrame(() => {
@@ -1104,7 +1231,7 @@ export default function ClientChat() {
           }
         };
 
-        // de-dup
+        // de-dup handlers before re-binding
         s.off("message", onMessage);
         s.off("typing", onTyping);
         s.off("system", onSystem);
@@ -1206,14 +1333,18 @@ export default function ClientChat() {
       return;
     }
 
+    // NEW: attach a clientNonce so the server echo can reconcile perfectly
+    const clientNonce = `cli-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
     try {
       const res = await sendClientRoomMessage(activeRoomId, {
         text: trimmed,
         files: fileArray,
+        clientNonce,
       });
 
       if (res?.message) {
-        const shaped = shapeForClient(res.message);
+        const shaped = shapeForClient({ ...res.message, clientNonce });
         safeAppend(setMessages, shaped);
         setRooms((prev) =>
           prev.map((r) =>

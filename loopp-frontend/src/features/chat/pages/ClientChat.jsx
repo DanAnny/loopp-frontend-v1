@@ -296,9 +296,15 @@ const roleToTheme = (role, isMine) => {
   return "client";
 };
 
+/* --- NEW: tempId + time helpers for optimistic messages --- */
+const tempId = () => `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const isoNow = () => new Date().toISOString();
+const hhmm = (d) =>
+  new Date(d).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
 const shapeForClient = (m) => {
   const created =
-    m.createdAt || m.createdAtISO || m.timestamp || new Date().toISOString();
+    m.createdAt || m.createdAtISO || m.timestamp || isoNow();
   const isSystem = String(m.senderType || "").toLowerCase() === "system";
 
   const role =
@@ -325,16 +331,17 @@ const shapeForClient = (m) => {
     _id: m._id || m.id || `${Date.now()}-${Math.random()}`,
     room: String(m.room?._id || m.room || ""),
     content: m.text || m.content || "",
-    timestamp: new Date(created).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
+    timestamp: hhmm(created),
     createdAtISO: new Date(created).toISOString(),
     isMine: mine,
     senderRole: role || "Client",
     senderName,
     attachments,
     bubbleTheme: roleToTheme(role || "", mine),
+    // NEW: delivery status if provided by caller (sending/sent/error)
+    delivery: m.delivery || "sent",
+    // NEW: temp client ID (present only on optimistic messages)
+    clientTempId: m.clientTempId || null,
   };
 };
 
@@ -354,6 +361,19 @@ function safeAppend(setMessages, incoming) {
     if (prev.some((x) => x._id === incoming._id || msgSignature(x) === sig))
       return prev;
     return [...prev, incoming];
+  });
+}
+function replaceMessage(setMessages, predicate, updater) {
+  setMessages((prev) => {
+    let changed = false;
+    const next = prev.map((m) => {
+      if (predicate(m)) {
+        changed = true;
+        return updater(m);
+      }
+      return m;
+    });
+    return changed ? next : prev;
   });
 }
 
@@ -601,15 +621,6 @@ function RatingSheet({ requestId, onClose, onRated }) {
 }
 
 /* --------------------------- presence utilities --------------------------- */
-/**
- * Three-state presence:
- * - ONLINE: actively in this room
- * - AWAY: online but not in this room
- * - OFFLINE: not online
- *
- * We track presence by room with a small member list. Each item:
- *   { id: "PM"|"Engineer"|"Client"|string, role, name, status }
- */
 const STATUS_ONLINE = "online";
 const STATUS_AWAY = "away";
 const STATUS_OFFLINE = "offline";
@@ -689,6 +700,7 @@ export default function ClientChat() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
   const lastRightClickText = useRef("");
+  const lastRightClickMessageId = useRef(null);
 
   const scrollerRef = useRef(null);
   const atBottomRef = useRef(true);
@@ -696,8 +708,11 @@ export default function ClientChat() {
   const messageRefs = useRef({});
 
   // NEW: fatal overlay state + reconnection ticker
-  const [fatal, setFatal] = useState(null); // { type: 'socket_timeout'|'join_failed'|'generic', message?:string }
+  const [fatal, setFatal] = useState(null);
   const [reconnectTick, setReconnectTick] = useState(0);
+
+  // NEW: keep original payload for optimistic retries
+  const pendingPayloadsRef = useRef({}); // tempId -> { text, files }
 
   const typingText = useMemo(() => {
     if (!activeRoomId) return "";
@@ -722,7 +737,6 @@ export default function ClientChat() {
           const map = { ...next[rid] };
           for (const uid of Object.keys(map)) {
             if (map[uid].until < now) {
-              // decay presence to AWAY (not OFFLINE) when typing expires
               setPresenceByRoom((p) => setStatus(p, rid, uid, STATUS_AWAY));
               delete map[uid];
               changed = true;
@@ -775,13 +789,12 @@ export default function ClientChat() {
     (async () => {
       try {
         setErr("");
-        setFatal(null); // clear any previous fatal state before attempting
+        setFatal(null);
 
         const res = await fetchClientRoomMessages(activeRoomId, { limit: 100 });
         const shaped = (res?.messages || []).map(shapeForClient);
         setMessages(shaped);
 
-        // Room meta – seed participants (PM/Engineer if available) + Client (You)
         let roomMeta = {};
         try {
           const metaRes = await Projects.getRoomMeta(activeRoomId);
@@ -789,12 +802,10 @@ export default function ClientChat() {
         } catch {}
 
         setPresenceByRoom((prev) => {
-          // Client = ONLINE, PM/Engineer = AWAY by default
           let next = ensureSeedParticipants(prev, activeRoomId, roomMeta);
           return next;
         });
 
-        // header + reopen flag
         let closed = Boolean(
           active?.isClosed === true || active?.isClosed === "true"
         );
@@ -808,7 +819,6 @@ export default function ClientChat() {
         });
         setReopenRequested(reopen);
 
-        // scroller & scroll listener
         const el = scrollerRef.current;
         if (el) {
           const onScroll = () => {
@@ -832,7 +842,7 @@ export default function ClientChat() {
           };
         }
 
-        // ---- SOCKET CONNECT (catch timeout -> fatal overlay) ----
+        // ---- SOCKET CONNECT (with timeout -> fatal overlay) ----
         try {
           const s = connectSocket();
           await waitForSocketConnected(getSocket());
@@ -843,10 +853,10 @@ export default function ClientChat() {
               e?.message ||
               "The live connection couldn’t be established before timing out.",
           });
-          return; // stop wiring listeners
+          return;
         }
 
-        // ---- JOIN ROOM (catch failure -> fatal overlay with rejoin CTA) ----
+        // ---- JOIN ROOM (with failure overlay) ----
         try {
           await joinSocketRoom(activeRoomId);
         } catch (e) {
@@ -857,7 +867,7 @@ export default function ClientChat() {
               e?.message ||
               "We couldn’t join this chat room.",
           });
-          return; // stop wiring listeners
+          return;
         }
 
         const s = getSocket();
@@ -867,12 +877,38 @@ export default function ClientChat() {
           const rid = String(m.room?._id || m.room);
           const shapedMsg = shapeForClient(m);
 
+          // If this is our own message and we have an optimistic "sending", reconcile it.
+          if (shapedMsg.isMine) {
+            // 1) reconcile by clientTempId if server echoes it (optional)
+            if (m.clientTempId) {
+              replaceMessage(
+                setMessages,
+                (x) => x.clientTempId && x.clientTempId === m.clientTempId,
+                () => ({ ...shapedMsg, delivery: "sent", clientTempId: null })
+              );
+            } else {
+              // 2) reconcile by content + near-time fallback
+              replaceMessage(
+                setMessages,
+                (x) =>
+                  x.isMine &&
+                  x.delivery === "sending" &&
+                  x.content === shapedMsg.content &&
+                  Math.abs(
+                    new Date(x.createdAtISO).getTime() -
+                      new Date(shapedMsg.createdAtISO).getTime()
+                  ) < 15000,
+                () => ({ ...shapedMsg, delivery: "sent", clientTempId: null })
+              );
+            }
+          }
+
           setRooms((prev) => {
             const idx = prev.findIndex((x) => String(x.id) === rid);
             if (idx === -1) return prev;
             const updated = {
               ...prev[idx],
-              updatedAtISO: m.createdAt || new Date().toISOString(),
+              updatedAtISO: m.createdAt || isoNow(),
               lastMessage: previewText(shapedMsg),
             };
             const rest = prev.slice(0, idx).concat(prev.slice(idx + 1));
@@ -881,7 +917,8 @@ export default function ClientChat() {
 
           if (rid !== String(activeRoomId)) return;
 
-          safeAppend(setMessages, shapedMsg);
+          // If we didn't replace an optimistic one above, append normally
+          safeAppend(setMessages, { ...shapedMsg, delivery: "sent" });
 
           if (atBottomRef.current || shapedMsg.isMine) {
             requestAnimationFrame(() => {
@@ -897,14 +934,14 @@ export default function ClientChat() {
           }
         };
 
-        // typing -> mark role ONLINE in this room; decay to AWAY via ticker above
+        // typing -> presence
         const onTyping = ({ roomId, role, isTyping, name }) => {
           const displayRole = normalizeRole(role) || "PM/Engineer";
           if (String(roomId) !== String(activeRoomId)) return;
 
           setTypingByRoom((prev) => {
             const map = { ...(prev[roomId] || {}) };
-            const key = displayRole; // stable key by role
+            const key = displayRole;
             if (isTyping) map[key] = { role: displayRole, until: Date.now() + 2500 };
             else delete map[key];
             return { ...prev, [roomId]: map };
@@ -925,14 +962,13 @@ export default function ClientChat() {
           }
         };
 
-        // system events: update inline notices + presence states
+        // system events / room state
         const onSystem = (payload = {}) => {
           const rid = String(payload.roomId || payload.room || "");
           const type = String(payload.type || "").toLowerCase();
           const pm = payload.pm || payload.user || {};
           const eng = payload.engineer || {};
 
-          // inline banner only for this room
           if (!rid || rid === String(activeRoomId)) {
             const label = noticeFromSystemEvent(payload);
             if (label) {
@@ -941,7 +977,7 @@ export default function ClientChat() {
                 room: String(activeRoomId),
                 inlineNotice: true,
                 noticeText: label,
-                createdAtISO: payload.timestamp || new Date().toISOString(),
+                createdAtISO: payload.timestamp || isoNow(),
               };
               setMessages((prev) => {
                 const last = prev[prev.length - 1];
@@ -959,7 +995,6 @@ export default function ClientChat() {
             }
           }
 
-          // presence updates (role-keyed)
           setPresenceByRoom((prev) => {
             let next = { ...prev };
             const pmName = [pm?.firstName, pm?.lastName].filter(Boolean).join(" ").trim() || "PM";
@@ -967,11 +1002,9 @@ export default function ClientChat() {
 
             if (!rid || rid === String(activeRoomId)) {
               if (type === "pm_assigned") {
-                // PM exists but may not be in the room yet -> AWAY
                 next = upsertMember(next, activeRoomId, "PM", "PM", pmName, STATUS_AWAY);
               }
               if (type === "pm_online") {
-                // When we do receive it (if broadcast), consider ACTIVE in room now
                 next = upsertMember(next, activeRoomId, "PM", "PM", pmName, STATUS_ONLINE);
               }
               if (type === "pm_assigned_engineer" || type === "engineer_joined") {
@@ -1069,7 +1102,7 @@ export default function ClientChat() {
                 ? {
                     ...r,
                     lastMessage: `${pmName} has been assigned as your PM. They’ll join shortly.`,
-                    updatedAtISO: payload?.at || new Date().toISOString(),
+                    updatedAtISO: payload?.at || isoNow(),
                   }
                 : r
             )
@@ -1080,7 +1113,7 @@ export default function ClientChat() {
             room: String(activeRoomId),
             inlineNotice: true,
             noticeText: "A PM HAS BEEN ASSIGNED",
-            createdAtISO: payload?.at || new Date().toISOString(),
+            createdAtISO: payload?.at || isoNow(),
           };
           setMessages((prev) => {
             const last = prev[prev.length - 1];
@@ -1089,7 +1122,6 @@ export default function ClientChat() {
             return [...prev, inline];
           });
 
-          // PM appears as AWAY (until they type / join)
           setPresenceByRoom((prev) =>
             upsertMember(prev, activeRoomId, "PM", "PM", pmName, STATUS_AWAY)
           );
@@ -1104,7 +1136,6 @@ export default function ClientChat() {
           }
         };
 
-        // de-dup
         s.off("message", onMessage);
         s.off("typing", onTyping);
         s.off("system", onSystem);
@@ -1121,7 +1152,6 @@ export default function ClientChat() {
         s.on("reopen:requested", onReopenRequested);
         s.on("room:pm_assigned", onPmAssigned);
       } catch (e) {
-        // fallback generic
         setErr(e?.response?.data?.message || e?.message || "Failed to load messages");
       }
     })();
@@ -1141,7 +1171,6 @@ export default function ClientChat() {
       } catch {}
       unsub?.();
     };
-    // include reconnectTick to allow retry attempts
   }, [activeRoomId, rooms, reconnectTick]);
 
   /* ----- ensure "You" is ONLINE when switching rooms ----- */
@@ -1161,6 +1190,93 @@ export default function ClientChat() {
   }, [messages, isAtBottom]);
 
   /* ------------------------------- actions ------------------------------ */
+  // NEW: create an optimistic message & update sidebar state
+  const appendOptimistic = (roomId, { text, files }) => {
+    const id = tempId();
+    const nowIso = isoNow();
+    const optimistic = shapeForClient({
+      _id: id,
+      clientTempId: id,
+      room: roomId,
+      text,
+      attachments: [], // attachments preview thumbs can be added here if you want
+      createdAtISO: nowIso,
+      senderRole: "Client",
+      senderName: "You",
+      delivery: "sending",
+    });
+
+    safeAppend(setMessages, optimistic);
+    setRooms((prev) =>
+      prev.map((r) =>
+        r.id === roomId
+          ? {
+              ...r,
+              lastMessage: previewText(optimistic),
+              updatedAtISO: nowIso,
+            }
+          : r
+      )
+    );
+
+    // save payload for retry if needed
+    pendingPayloadsRef.current[id] = { text, files };
+    return id;
+  };
+
+  const markDelivery = (clientTempId, status, realMessageIfAny = null) => {
+    replaceMessage(
+      setMessages,
+      (m) => m.clientTempId === clientTempId || m._id === clientTempId,
+      (m) => ({
+        ...(realMessageIfAny ? shapeForClient(realMessageIfAny) : m),
+        delivery: status,
+        clientTempId: status === "sent" ? null : m.clientTempId || m._id,
+      })
+    );
+  };
+
+  const reconcileOptimisticWithServer = (clientTempId, serverMsg) => {
+    // Replace optimistic with server version, mark as sent
+    replaceMessage(
+      setMessages,
+      (m) => m.clientTempId === clientTempId || m._id === clientTempId,
+      () => ({ ...shapeForClient(serverMsg), delivery: "sent", clientTempId: null })
+    );
+    delete pendingPayloadsRef.current[clientTempId];
+  };
+
+  const retrySend = async (clientTempId) => {
+    const active = rooms.find((r) => r.id === activeRoomId);
+    if (!activeRoomId || !active?.hasRoom || active?.isClosed || header.status === "Closed") return;
+
+    const payload = pendingPayloadsRef.current[clientTempId];
+    if (!payload) return;
+
+    // flip back to "sending"
+    markDelivery(clientTempId, "sending");
+
+    try {
+      const res = await sendClientRoomMessage(activeRoomId, {
+        text: payload.text,
+        files: payload.files || [],
+        clientTempId, // let server echo it back if possible
+      });
+      if (res?.message) {
+        reconcileOptimisticWithServer(clientTempId, res.message);
+      } else {
+        markDelivery(clientTempId, "sent");
+        delete pendingPayloadsRef.current[clientTempId];
+      }
+    } catch (e) {
+      markDelivery(
+        clientTempId,
+        "error"
+      );
+      setErr(e?.response?.data?.message || e?.message || "Failed to send");
+    }
+  };
+
   const onSend = async (text, files = []) => {
     const active = rooms.find((r) => r.id === activeRoomId);
     if (!activeRoomId || !active?.hasRoom || active?.isClosed || header.status === "Closed") return;
@@ -1206,26 +1322,20 @@ export default function ClientChat() {
       return;
     }
 
+    // 1) optimistic append immediately (sending)
+    const cid = appendOptimistic(activeRoomId, { text: trimmed, files: fileArray });
+
+    // 2) attempt real send
     try {
       const res = await sendClientRoomMessage(activeRoomId, {
         text: trimmed,
         files: fileArray,
+        clientTempId: cid, // so server can echo back and we reconcile cleanly
       });
 
       if (res?.message) {
-        const shaped = shapeForClient(res.message);
-        safeAppend(setMessages, shaped);
-        setRooms((prev) =>
-          prev.map((r) =>
-            r.id === activeRoomId
-              ? {
-                  ...r,
-                  lastMessage: previewText(shaped),
-                  updatedAtISO: new Date().toISOString(),
-                }
-              : r
-          )
-        );
+        // 3) reconcile optimistic with server message (sent)
+        reconcileOptimisticWithServer(cid, res.message);
 
         requestAnimationFrame(() => {
           scrollerRef.current?.scrollTo({
@@ -1235,8 +1345,14 @@ export default function ClientChat() {
           setIsAtBottom(true);
           setUnreadCount(0);
         });
+      } else {
+        // no message object returned → just mark as sent
+        markDelivery(cid, "sent");
+        delete pendingPayloadsRef.current[cid];
       }
     } catch (e) {
+      // mark as error & keep payload for retry
+      markDelivery(cid, "error");
       setErr(e?.response?.data?.message || e?.message || "Failed to send");
     }
   };
@@ -1303,6 +1419,19 @@ export default function ClientChat() {
     lastRightClickText.current =
       selectedText ||
       (e.target?.innerText ? String(e.target.innerText).trim().slice(0, 2000) : "");
+
+    // try to find nearest message bubble element with a data-id we set below
+    let el = e.target;
+    let msgId = null;
+    while (el && el !== document.body) {
+      if (el.dataset && el.dataset.msgId) {
+        msgId = el.dataset.msgId;
+        break;
+      }
+      el = el.parentElement;
+    }
+    lastRightClickMessageId.current = msgId;
+
     setMenuPos({ x: e.clientX, y: e.clientY });
     setMenuOpen(true);
   };
@@ -1325,6 +1454,19 @@ export default function ClientChat() {
         if (t) navigator.clipboard?.writeText(t);
       },
     },
+    // NEW: Retry for failed messages
+    {
+      id: "retry",
+      label: "Retry send (if failed)",
+      onClick: () => {
+        const id = lastRightClickMessageId.current;
+        if (!id) return;
+        const m = messages.find((x) => x._id === id || x.clientTempId === id);
+        if (m && m.delivery === "error") {
+          retrySend(m.clientTempId || m._id);
+        }
+      },
+    },
     { id: "reply", label: "Reply", onClick: () => {} },
     { id: "delete", label: "Delete (if allowed)", onClick: () => {} },
   ];
@@ -1333,9 +1475,6 @@ export default function ClientChat() {
 
   if (loading) return <div className="h-screen grid place-items-center">Loading chat…</div>;
 
-  // Keep err as a small banner rather than blocking the app;
-  // the fatal overlay handles socket/join failures.
-  // (You can still surface generic errors here if you want.)
   const genericErrBanner = err ? (
     <div className="px-4 py-2 text-sm text-red-700 bg-red-50 border-b border-red-200">
       {err}
@@ -1361,12 +1500,10 @@ export default function ClientChat() {
     id: m.id || m.role,
     name: m.name,
     role: m.role,
-    // Map our 3-state to ChatHeader expectations:
-    isOnline: m.status !== STATUS_OFFLINE,   // online or away
-    inRoom: m.status === STATUS_ONLINE,      // active in this room
+    isOnline: m.status !== STATUS_OFFLINE,
+    inRoom: m.status === STATUS_ONLINE,
   }));
 
-  // Header data (status line uses typingText when online)
   const headerData = {
     ...header,
     status: header.status === "Online" ? typingText || "Online" : header.status,
@@ -1391,11 +1528,7 @@ export default function ClientChat() {
   };
 
   const refreshPage = () => window.location.reload();
-
-  const retryJoin = () => {
-    // Trigger the effect to re-run the whole socket/join flow
-    setReconnectTick((t) => t + 1);
-  };
+  const retryJoin = () => setReconnectTick((t) => t + 1);
 
   return (
     <div className="h-screen flex flex-col bg-white text-black relative">
@@ -1409,7 +1542,7 @@ export default function ClientChat() {
         />
       )}
 
-      {/* Fixed minimal top bar (brand/back) */}
+      {/* Fixed minimal top bar */}
       <div className="flex-none h-12 md:h-14 w-full border-b z-40 bg-white border-gray-200">
         <div className="h-full max-w-[1920px] mx-auto px-3 md:px-4 flex items-center justify-between">
           <a
@@ -1669,7 +1802,12 @@ export default function ClientChat() {
                       m.inlineNotice ? (
                         <InlineNotice key={m._id} text={m.noticeText} />
                       ) : (
-                        <div key={m._id} ref={(el) => (messageRefs.current[m._id] = el)}>
+                        <div
+                          key={m._id}
+                          ref={(el) => (messageRefs.current[m._id] = el)}
+                          data-msg-id={m._id}
+                        >
+                          {/* Pass delivery state down so the bubble can show clock/check/error */}
                           <MessageBubble message={m} highlighted={highlightedMessageId === m._id} />
                         </div>
                       )
@@ -1720,7 +1858,7 @@ export default function ClientChat() {
       {ratingOpen && requestIdForRating && (
         <RatingModal
           requestId={requestIdForRating}
-          roomId={activeRoomId} // lets the modal validate status=Review & not already rated
+          roomId={activeRoomId}
           onClose={() => setRatingOpen(false)}
           onRated={() => {
             setHasRated(true);

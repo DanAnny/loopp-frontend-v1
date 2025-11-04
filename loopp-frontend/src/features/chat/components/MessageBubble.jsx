@@ -6,6 +6,8 @@ import {
   FileText,
   File,
   CheckCheck,
+  Clock,
+  X as XIcon,
 } from "lucide-react";
 import MessageContextMenu from "./MessageContextMenu";
 import { fileHref } from "../../utils/fileHref";
@@ -142,6 +144,18 @@ function normalizeAttachment(att) {
     : att.url;
 
   return { filename, contentType, length, previewUrl, downloadUrl };
+}
+
+/* --------------------------- delivery indicator --------------------------- */
+function DeliveryIcon({ delivery }) {
+  if (delivery === "sending") {
+    return <Clock className="w-3.5 h-3.5 opacity-70" title="Sending…" />;
+  }
+  if (delivery === "error") {
+    return <XIcon className="w-3.5 h-3.5 text-red-500" title="Failed to send" />;
+  }
+  // default = "sent"
+  return <CheckCheck className="w-3.5 h-3.5 opacity-80" title="Sent" />;
 }
 
 /* ---------------------------------- main ---------------------------------- */
@@ -345,16 +359,17 @@ export default function MessageBubble({
 
                   if (isImage && !imgError[previewUrl]) {
                     return (
-                      <div
-                        key={idx}
-                        className="relative group/img inline-block"
-                      >
+                      <div key={idx} className="relative group/img inline-block">
+                        {/* Open modal preview instead of new tab */}
                         <a
                           href={previewUrl}
-                          target="_blank"
-                          rel="noreferrer"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setPreviewUrl(previewUrl);
+                          }}
                           className="block rounded-lg overflow-hidden"
                           title={filename}
+                          rel="noreferrer"
                         >
                           <ImageThumb url={previewUrl} alt={filename} />
                         </a>
@@ -402,14 +417,17 @@ export default function MessageBubble({
                         {(isPdf || isImageCT(contentType)) && (
                           <a
                             href={previewUrl}
-                            target="_blank"
-                            rel="noreferrer"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              setPreviewUrl(previewUrl);
+                            }}
                             className={`${
                               message.isMine
                                 ? "hover:bg-white/20"
                                 : "hover:bg-black/10"
                             } p-1 rounded transition`}
                             title="Preview"
+                            rel="noreferrer"
                           >
                             <ExternalLink className="w-3.5 h-3.5" />
                           </a>
@@ -445,7 +463,7 @@ export default function MessageBubble({
             <span>{formatTime(message.createdAtISO)}</span>
             {message.isMine && (
               <span className="flex items-center">
-                <CheckCheck className="w-3.5 h-3.5 opacity-80" />
+                <DeliveryIcon delivery={message.delivery || "sent"} />
               </span>
             )}
           </div>
@@ -472,6 +490,7 @@ export default function MessageBubble({
           <button
             onClick={() => setPreviewUrl(null)}
             className="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 rounded-full transition"
+            aria-label="Close preview"
           >
             <X className="w-6 h-6 text-white" />
           </button>

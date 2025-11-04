@@ -338,9 +338,9 @@ const shapeForClient = (m) => {
     senderName,
     attachments,
     bubbleTheme: roleToTheme(role || "", mine),
-    // NEW: delivery status if provided by caller (sending/sent/error)
+    // delivery status ("sending" | "sent" | "error")
     delivery: m.delivery || "sent",
-    // NEW: temp client ID (present only on optimistic messages)
+    // keep temp id to maintain stable keys even after ack
     clientTempId: m.clientTempId || null,
   };
 };
@@ -879,12 +879,19 @@ export default function ClientChat() {
 
           // If this is our own message and we have an optimistic "sending", reconcile it.
           if (shapedMsg.isMine) {
-            // 1) reconcile by clientTempId if server echoes it (optional)
+            // 1) reconcile by clientTempId if server echoes it (preferred)
             if (m.clientTempId) {
               replaceMessage(
                 setMessages,
-                (x) => x.clientTempId && x.clientTempId === m.clientTempId,
-                () => ({ ...shapedMsg, delivery: "sent", clientTempId: null })
+                (x) =>
+                  (x.clientTempId && x.clientTempId === m.clientTempId) ||
+                  x._id === m.clientTempId,
+                (prevMsg) => ({
+                  ...shapedMsg,
+                  // keep clientTempId to preserve React key stability
+                  clientTempId: prevMsg.clientTempId || m.clientTempId,
+                  delivery: "sent",
+                })
               );
             } else {
               // 2) reconcile by content + near-time fallback
@@ -898,7 +905,11 @@ export default function ClientChat() {
                     new Date(x.createdAtISO).getTime() -
                       new Date(shapedMsg.createdAtISO).getTime()
                   ) < 15000,
-                () => ({ ...shapedMsg, delivery: "sent", clientTempId: null })
+                (prevMsg) => ({
+                  ...shapedMsg,
+                  clientTempId: prevMsg.clientTempId || prevMsg._id,
+                  delivery: "sent",
+                })
               );
             }
           }
@@ -917,7 +928,7 @@ export default function ClientChat() {
 
           if (rid !== String(activeRoomId)) return;
 
-          // If we didn't replace an optimistic one above, append normally
+          // Append if we didn't already have this id (safeAppend checks)
           safeAppend(setMessages, { ...shapedMsg, delivery: "sent" });
 
           if (atBottomRef.current || shapedMsg.isMine) {
@@ -1199,7 +1210,7 @@ export default function ClientChat() {
       clientTempId: id,
       room: roomId,
       text,
-      attachments: [], // attachments preview thumbs can be added here if you want
+      attachments: [], // attachment preview thumbs could be added
       createdAtISO: nowIso,
       senderRole: "Client",
       senderName: "You",
@@ -1228,20 +1239,28 @@ export default function ClientChat() {
     replaceMessage(
       setMessages,
       (m) => m.clientTempId === clientTempId || m._id === clientTempId,
-      (m) => ({
-        ...(realMessageIfAny ? shapeForClient(realMessageIfAny) : m),
-        delivery: status,
-        clientTempId: status === "sent" ? null : m.clientTempId || m._id,
-      })
+      (m) => {
+        const base = realMessageIfAny ? shapeForClient(realMessageIfAny) : m;
+        return {
+          ...base,
+          // preserve clientTempId forever to keep React key stable
+          clientTempId: m.clientTempId || clientTempId,
+          delivery: status,
+        };
+      }
     );
   };
 
   const reconcileOptimisticWithServer = (clientTempId, serverMsg) => {
-    // Replace optimistic with server version, mark as sent
+    // Replace optimistic with server version, mark as sent, KEEP clientTempId
     replaceMessage(
       setMessages,
       (m) => m.clientTempId === clientTempId || m._id === clientTempId,
-      () => ({ ...shapeForClient(serverMsg), delivery: "sent", clientTempId: null })
+      (prevMsg) => ({
+        ...shapeForClient(serverMsg),
+        clientTempId: prevMsg.clientTempId || clientTempId,
+        delivery: "sent",
+      })
     );
     delete pendingPayloadsRef.current[clientTempId];
   };
@@ -1269,10 +1288,7 @@ export default function ClientChat() {
         delete pendingPayloadsRef.current[clientTempId];
       }
     } catch (e) {
-      markDelivery(
-        clientTempId,
-        "error"
-      );
+      markDelivery(clientTempId, "error");
       setErr(e?.response?.data?.message || e?.message || "Failed to send");
     }
   };
@@ -1403,8 +1419,9 @@ export default function ClientChat() {
     const flat = messages;
     const m = flat[index];
     if (!m) return;
-    setHighlightedMessageId(m._id);
-    const node = messageRefs.current[m._id];
+    const stableId = m.clientTempId || m._id;
+    setHighlightedMessageId(stableId);
+    const node = messageRefs.current[stableId];
     if (node) {
       node.scrollIntoView({ behavior: "smooth", block: "center" });
       setTimeout(() => setHighlightedMessageId(null), 2000);
@@ -1420,7 +1437,7 @@ export default function ClientChat() {
       selectedText ||
       (e.target?.innerText ? String(e.target.innerText).trim().slice(0, 2000) : "");
 
-    // try to find nearest message bubble element with a data-id we set below
+    // find nearest message bubble element with our data-id
     let el = e.target;
     let msgId = null;
     while (el && el !== document.body) {
@@ -1454,14 +1471,14 @@ export default function ClientChat() {
         if (t) navigator.clipboard?.writeText(t);
       },
     },
-    // NEW: Retry for failed messages
+    // Retry for failed messages
     {
       id: "retry",
       label: "Retry send (if failed)",
       onClick: () => {
         const id = lastRightClickMessageId.current;
         if (!id) return;
-        const m = messages.find((x) => x._id === id || x.clientTempId === id);
+        const m = messages.find((x) => (x.clientTempId || x._id) === id);
         if (m && m.delivery === "error") {
           retrySend(m.clientTempId || m._id);
         }
@@ -1529,6 +1546,15 @@ export default function ClientChat() {
 
   const refreshPage = () => window.location.reload();
   const retryJoin = () => setReconnectTick((t) => t + 1);
+
+  // Sort messages by createdAtISO ASC before grouping (prevents bounce)
+  const sortedMessages = useMemo(() => {
+    const copy = [...messages];
+    copy.sort((a, b) =>
+      String(a.createdAtISO || "").localeCompare(String(b.createdAtISO || ""))
+    );
+    return copy;
+  }, [messages]);
 
   return (
     <div className="h-screen flex flex-col bg-white text-black relative">
@@ -1739,7 +1765,7 @@ export default function ClientChat() {
           {showSearch && (
             <div className="px-4 pt-2 z-10 animate-slide-down">
               <SearchBar
-                messages={messages}
+                messages={sortedMessages}
                 onClose={() => setShowSearch(false)}
                 onResultSelect={handleSearchResultSelect}
               />
@@ -1787,7 +1813,7 @@ export default function ClientChat() {
             onContextMenu={handleContextMenu}
           >
             {activeRoomId && active?.hasRoom ? (
-              groupMessagesByDate(messages).map((group, idx) => (
+              groupMessagesByDate(sortedMessages).map((group, idx) => (
                 <div key={idx} className="mb-6">
                   {/* Date Separator */}
                   <div className="flex items-center justify-center mb-4">
@@ -1803,12 +1829,12 @@ export default function ClientChat() {
                         <InlineNotice key={m._id} text={m.noticeText} />
                       ) : (
                         <div
-                          key={m._id}
-                          ref={(el) => (messageRefs.current[m._id] = el)}
-                          data-msg-id={m._id}
+                          key={m.clientTempId || m._id}
+                          ref={(el) => (messageRefs.current[m.clientTempId || m._id] = el)}
+                          data-msg-id={m.clientTempId || m._id}
                         >
                           {/* Pass delivery state down so the bubble can show clock/check/error */}
-                          <MessageBubble message={m} highlighted={highlightedMessageId === m._id} />
+                          <MessageBubble message={m} highlighted={highlightedMessageId === (m.clientTempId || m._id)} />
                         </div>
                       )
                     )}

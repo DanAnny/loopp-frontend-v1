@@ -6,8 +6,6 @@ import {
   FileText,
   File,
   CheckCheck,
-  Clock,
-  X as XIcon,
 } from "lucide-react";
 import MessageContextMenu from "./MessageContextMenu";
 import { fileHref } from "../../utils/fileHref";
@@ -146,16 +144,35 @@ function normalizeAttachment(att) {
   return { filename, contentType, length, previewUrl, downloadUrl };
 }
 
-/* --------------------------- delivery indicator --------------------------- */
+/* ---------------------------- tiny delivery icon ----------------------------- */
 function DeliveryIcon({ delivery }) {
   if (delivery === "sending") {
-    return <Clock className="w-3.5 h-3.5 opacity-70" title="Sending…" />;
+    return (
+      <span title="Sending…" className="inline-block w-3.5 h-3.5">
+        {/* clock */}
+        <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 opacity-70">
+          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M12 7v5l3 2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      </span>
+    );
   }
   if (delivery === "error") {
-    return <XIcon className="w-3.5 h-3.5 text-red-500" title="Failed to send" />;
+    return (
+      <span title="Failed to send" className="inline-block w-3.5 h-3.5">
+        {/* small x */}
+        <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 text-red-600">
+          <path d="M6 6l12 12M18 6l-12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      </span>
+    );
   }
-  // default = "sent"
-  return <CheckCheck className="w-3.5 h-3.5 opacity-80" title="Sent" />;
+  // default 'sent'
+  return (
+    <span title="Delivered" className="inline-flex items-center">
+      <CheckCheck className="w-3.5 h-3.5 opacity-80" />
+    </span>
+  );
 }
 
 /* ---------------------------------- main ---------------------------------- */
@@ -165,17 +182,12 @@ export default function MessageBubble({
   onEdit,
   onDelete,
 }) {
+  // ✅ Always call hooks in the same order on every render
   const [imgError, setImgError] = useState({});
   const [contextMenu, setContextMenu] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content || "");
   const [previewUrl, setPreviewUrl] = useState(null);
-
-  const theme = themeStyles[message.bubbleTheme] || themeStyles.user;
-  const maxWidth =
-    message.bubbleTheme === "system"
-      ? "max-w-md"
-      : "max-w-[75%] md:max-w-[65%]";
 
   const formatTime = (isoString) => {
     if (!isoString && message.timestamp) return message.timestamp;
@@ -183,34 +195,10 @@ export default function MessageBubble({
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
-  /* --------------------------- system chip variant -------------------------- */
-  if (message.bubbleTheme === "system") {
-    return (
-      <div className="flex justify-center my-6">
-        <div className="bg-yellow-50 border border-yellow-200 shadow-sm rounded-2xl px-5 py-3 max-w-lg">
-          <div className="flex items-center gap-2 justify-center">
-            <svg
-              className="w-4 h-4 text-yellow-600"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
-              <path
-                fillRule="evenodd"
-                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                clipRule="evenodd"
-              />
-            </svg>
-            <div className="text-sm font-medium text-yellow-900">
-              {message.content}
-            </div>
-          </div>
-          <div className="text-[10px] text-yellow-700/60 text-center mt-1">
-            {formatTime(message.createdAtISO)}
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const isSystem = message.bubbleTheme === "system";
+
+  const theme = themeStyles[message.bubbleTheme] || themeStyles.user;
+  const maxWidth = isSystem ? "max-w-md" : "max-w-[75%] md:max-w-[65%]";
 
   /* ----------------------------- handlers (UI only) -------------------------- */
   const handleContextMenu = (e) => {
@@ -268,7 +256,7 @@ export default function MessageBubble({
   }
 
   const headerRole = rawRole;
-  const showHeader = message.bubbleTheme !== "system";
+  const showHeader = !isSystem;
 
   /* --------------------------------- render --------------------------------- */
   return (
@@ -294,162 +282,190 @@ export default function MessageBubble({
         onContextMenu={handleContextMenu}
       >
         <div className="px-3 pt-2">
-          {!isEditing && message.content && (
-            <div className="text-[15px] leading-relaxed whitespace-pre-wrap break-words">
-              {renderWithLinks(message.content)}
-            </div>
-          )}
-
-          {isEditing && (
-            <div className="space-y-2">
-              <textarea
-                value={editContent}
-                onChange={(e) => setEditContent(e.target.value)}
-                className={`w-full px-2 py-1 text-[15px] rounded-lg border outline-none resize-none ${
-                  message.isMine
-                    ? "bg-white/10 border-white/20 focus:border-white/40"
-                    : "bg-white border-gray-200 focus:border-gray-400"
-                }`}
-                rows={3}
-                autoFocus
-              />
-              <div className="flex gap-2 justify-end">
-                <button
-                  onClick={handleEditCancel}
-                  className={`px-3 py-1 text-xs rounded-lg transition ${
-                    message.isMine
-                      ? "bg-white/10 hover:bg-white/20"
-                      : "bg-black/5 hover:bg-black/10"
-                  }`}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleEditSave}
-                  className={`px-3 py-1 text-xs rounded-lg transition ${
-                    message.isMine
-                      ? "bg-white/20 hover:bg-white/30"
-                      : "bg-black/10 hover:bg-black/20"
-                  }`}
-                >
-                  Save
-                </button>
+          {/* System variant body */}
+          {isSystem ? (
+            <>
+              <div className="flex justify-center my-1">
+                <div className="bg-yellow-50 border border-yellow-200 shadow-sm rounded-2xl px-5 py-3 max-w-lg w-full">
+                  <div className="flex items-center gap-2 justify-center">
+                    <svg
+                      className="w-4 h-4 text-yellow-600"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    <div className="text-sm font-medium text-yellow-900">
+                      {message.content}
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-yellow-700/60 text-center mt-1">
+                    {formatTime(message.createdAtISO)}
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            </>
+          ) : (
+            <>
+              {!isEditing && message.content && (
+                <div className="text-[15px] leading-relaxed whitespace-pre-wrap break-words">
+                  {renderWithLinks(message.content)}
+                </div>
+              )}
 
-          {Array.isArray(message.attachments) &&
-            message.attachments.length > 0 && (
-              <div className="mt-2 space-y-2">
-                {message.attachments.map((att, idx) => {
-                  const meta = normalizeAttachment(att);
-                  const {
-                    filename,
-                    contentType,
-                    length,
-                    previewUrl,
-                    downloadUrl,
-                  } = meta;
-                  const isImage =
-                    isImageCT(contentType) ||
-                    /\.(jpg|jpeg|png|gif|webp)$/i.test(filename);
-                  const isPdf =
-                    isPdfCT(contentType) ||
-                    filename.toLowerCase().endsWith(".pdf");
-
-                  if (isImage && !imgError[previewUrl]) {
-                    return (
-                      <div key={idx} className="relative group/img inline-block">
-                        {/* Open modal preview instead of new tab */}
-                        <a
-                          href={previewUrl}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            setPreviewUrl(previewUrl);
-                          }}
-                          className="block rounded-lg overflow-hidden"
-                          title={filename}
-                          rel="noreferrer"
-                        >
-                          <ImageThumb url={previewUrl} alt={filename} />
-                        </a>
-                        <a
-                          href={downloadUrl}
-                          className="absolute top-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 rounded-full opacity-0 group-hover/img:opacity-100 transition-opacity"
-                          title="Download"
-                        >
-                          <Download className="w-4 h-4 text-white" />
-                        </a>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div
-                      key={idx}
-                      className={`flex items-center gap-2 p-2 rounded-lg ${
-                        message.isMine ? "bg-white/10" : "bg-black/5"
+              {isEditing && (
+                <div className="space-y-2">
+                  <textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    className={`w-full px-2 py-1 text-[15px] rounded-lg border outline-none resize-none ${
+                      message.isMine
+                        ? "bg-white/10 border-white/20 focus:border-white/40"
+                        : "bg-white border-gray-200 focus:border-gray-400"
+                    }`}
+                    rows={3}
+                    autoFocus
+                  />
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      onClick={handleEditCancel}
+                      className={`px-3 py-1 text-xs rounded-lg transition ${
+                        message.isMine
+                          ? "bg-white/10 hover:bg-white/20"
+                          : "bg-black/5 hover:bg-black/10"
                       }`}
                     >
-                      <div
-                        className={`p-1.5 rounded ${
-                          message.isMine ? "bg-white/20" : "bg-black/10"
-                        }`}
-                      >
-                        {isPdf ? (
-                          <FileText className="w-4 h-4" />
-                        ) : (
-                          <File className="w-4 h-4" />
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <span className="text-xs truncate block">
-                          {filename}
-                        </span>
-                        <span className="text-[10px] opacity-70 truncate block">
-                          {contentType || "file"}
-                          {typeof length === "number"
-                            ? ` • ${(length / (1024 * 1024)).toFixed(2)} MB`
-                            : ""}
-                        </span>
-                      </div>
-                      <div className="flex gap-1">
-                        {(isPdf || isImageCT(contentType)) && (
-                          <a
-                            href={previewUrl}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              setPreviewUrl(previewUrl);
-                            }}
-                            className={`${
-                              message.isMine
-                                ? "hover:bg-white/20"
-                                : "hover:bg-black/10"
-                            } p-1 rounded transition`}
-                            title="Preview"
-                            rel="noreferrer"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        )}
-                        <a
-                          href={downloadUrl}
-                          className={`${
-                            message.isMine
-                              ? "hover:bg-white/20"
-                              : "hover:bg-black/10"
-                          } p-1 rounded transition`}
-                          title="Download"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                        </a>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleEditSave}
+                      className={`px-3 py-1 text-xs rounded-lg transition ${
+                        message.isMine
+                          ? "bg-white/20 hover:bg-white/30"
+                          : "bg-black/10 hover:bg-black/20"
+                      }`}
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              )}
 
+              {Array.isArray(message.attachments) &&
+                message.attachments.length > 0 && (
+                  <div className="mt-2 space-y-2">
+                    {message.attachments.map((att, idx) => {
+                      const meta = normalizeAttachment(att);
+                      const {
+                        filename,
+                        contentType,
+                        length,
+                        previewUrl,
+                        downloadUrl,
+                      } = meta;
+                      const isImage =
+                        isImageCT(contentType) ||
+                        /\.(jpg|jpeg|png|gif|webp)$/i.test(filename);
+                      const isPdf =
+                        isPdfCT(contentType) ||
+                        filename.toLowerCase().endsWith(".pdf");
+
+                      if (isImage && !imgError[previewUrl]) {
+                        return (
+                          <div
+                            key={idx}
+                            className="relative group/img inline-block"
+                          >
+                            <a
+                              href={previewUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block rounded-lg overflow-hidden"
+                              title={filename}
+                            >
+                              <ImageThumb url={previewUrl} alt={filename} />
+                            </a>
+                            <a
+                              href={downloadUrl}
+                              className="absolute top-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 rounded-full opacity-0 group-hover/img:opacity-100 transition-opacity"
+                              title="Download"
+                            >
+                              <Download className="w-4 h-4 text-white" />
+                            </a>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={idx}
+                          className={`flex items-center gap-2 p-2 rounded-lg ${
+                            message.isMine ? "bg-white/10" : "bg-black/5"
+                          }`}
+                        >
+                          <div
+                            className={`p-1.5 rounded ${
+                              message.isMine ? "bg-white/20" : "bg-black/10"
+                            }`}
+                          >
+                            {isPdf ? (
+                              <FileText className="w-4 h-4" />
+                            ) : (
+                              <File className="w-4 h-4" />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <span className="text-xs truncate block">
+                              {filename}
+                            </span>
+                            <span className="text-[10px] opacity-70 truncate block">
+                              {contentType || "file"}
+                              {typeof length === "number"
+                                ? ` • ${(length / (1024 * 1024)).toFixed(2)} MB`
+                                : ""}
+                            </span>
+                          </div>
+                          <div className="flex gap-1">
+                            {(isPdf || isImageCT(contentType)) && (
+                              <a
+                                href={previewUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className={`${
+                                  message.isMine
+                                    ? "hover:bg-white/20"
+                                    : "hover:bg-black/10"
+                                } p-1 rounded transition`}
+                                title="Preview"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+                            )}
+                            <a
+                              href={downloadUrl}
+                              className={`${
+                                message.isMine
+                                  ? "hover:bg-white/20"
+                                  : "hover:bg-black/10"
+                              } p-1 rounded transition`}
+                              title="Download"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+            </>
+          )}
+
+          {/* footer row (time + delivery) */}
           <div
             className={`mt-1 mb-2 text-[10px] flex items-center gap-1.5 ${
               message.isMine
@@ -461,11 +477,7 @@ export default function MessageBubble({
               <span className="italic opacity-70">edited</span>
             )}
             <span>{formatTime(message.createdAtISO)}</span>
-            {message.isMine && (
-              <span className="flex items-center">
-                <DeliveryIcon delivery={message.delivery || "sent"} />
-              </span>
-            )}
+            {message.isMine && <DeliveryIcon delivery={message.delivery || "sent"} />}
           </div>
         </div>
       </div>
@@ -490,7 +502,6 @@ export default function MessageBubble({
           <button
             onClick={() => setPreviewUrl(null)}
             className="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 rounded-full transition"
-            aria-label="Close preview"
           >
             <X className="w-6 h-6 text-white" />
           </button>

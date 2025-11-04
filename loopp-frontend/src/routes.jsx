@@ -70,7 +70,7 @@ export const router = createBrowserRouter([
       { path: 'tasks', element: <EngineerTasks /> },
 
       // Shared
-      { path: 'profile', element: <Text title="Profile" /> },
+      { path: 'profile', element: <ComingSoon title="Profile" note="This screen is not wired yet." /> },
 
       // The standalone /chat route above is the one without navbar/sidebar.)
       { path: 'chat/:roomId', element: <Text title="Chat Room" /> },

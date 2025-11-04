@@ -418,14 +418,14 @@ export default function Topbar({ sidebarOpen, setSidebarOpen }) {
                   </div>
 
                   <div className="py-2">
-                    {/* <Link
+                    <Link
                       to="/profile"
                       className={`w-full flex items-center gap-3 px-4 py-3 transition-colors ${hoverSoft} text-white`}
                       onClick={() => setProfileOpen(false)}
-                    > */}
+                    >
                       <User className="w-4 h-4" />
                       <span>My Profile (coming soon)</span>
-                    {/* </Link> */}
+                    </Link>
 
                     {isSuperAdmin && (
                       <button

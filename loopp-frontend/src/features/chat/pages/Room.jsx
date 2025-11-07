@@ -17,6 +17,7 @@ import InlineNotification from "@/features/chat/components/InlineNotification";
 import ChatBackground from "@/features/chat/components/ChatBackground";
 import UnreadMessagesIndicator from "@/features/chat/components/UnreadMessagesIndicator";
 import InvoiceModal from "../components/InvoiceModal";
+import ZoomModal from "../components/ZoomModal";
 
 // within ~Room.jsx
 
@@ -425,6 +426,7 @@ export default function Room() {
 
   // PM actions
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [showZoomModal, setShowZoomModal] = useState(false);
 
   // UI-only state
   const [showSidebar, setShowSidebar] = useState(false);
@@ -865,6 +867,7 @@ export default function Room() {
     if (userRole !== "PM") return [];
     return [
       { id: "invoice", title: "Generate an invoice", subtitle: "Create a Stripe hosted invoice for this project", hint: "invoice" },
+      { id: "zoom", title: "Generate a Zoom meeting link", subtitle: "Create an instant Zoom room for this project", hint: "zoom" },
     ];
   }, [userRole]);
 
@@ -873,6 +876,10 @@ export default function Room() {
       if (!activeRoomId) return;
       if (cmd.id === "invoice") {
         setShowInvoiceModal(true);
+        return;
+      }
+      if (cmd.id === "zoom") {
+        setShowZoomModal(true);
         return;
       }
     } catch (e) {
@@ -1297,7 +1304,12 @@ export default function Room() {
                     onTypingChange={handleTypingChange}
                     typingText=""
                     disabled={roomClosed}
-                    commands={userRole === "PM" ? [{ id: "invoice", title: "Generate an invoice", subtitle: "Create a Stripe hosted invoice for this project", hint: "invoice" }] : []}
+                    commands={userRole === "PM"
+                      ? [
+                          { id: "invoice", title: "Generate an invoice", subtitle: "Create a Stripe hosted invoice for this project", hint: "invoice" },
+                          { id: "zoom", title: "Generate a Zoom meeting link", subtitle: "Create an instant Zoom room for this project", hint: "zoom" },
+                        ]
+                      : []}
                     onCommandRun={handleRunCommand}
                     role={userRole}
                   />
@@ -1361,6 +1373,42 @@ export default function Room() {
               ]);
             } catch (e) {
               setErr(e?.response?.data?.message || e?.message || "Failed to create invoice");
+            }
+          }}
+        />
+      )}
+      {showZoomModal && userRole === "PM" && (
+        <ZoomModal
+          projectTitle={project?.projectTitle}
+          onCancel={() => setShowZoomModal(false)}
+          onSubmit={async ({ topic, durationMinutes }) => {
+            try {
+              const pid = project?._id || project?.id;
+              if (!pid) throw new Error("No project found for this room.");
+
+              const res = await meetings.createZoomMeeting({
+                projectId: pid,
+                topic,
+                durationMinutes,
+              });
+
+              // Expect: res.join_url, res.start_url, res.meeting_id, res.password
+              const parts = [];
+              if (res.join_url) parts.push(`Join: ${res.join_url}`);
+              if (res.start_url) parts.push(`Host: ${res.start_url}`);
+              if (res.meeting_id) parts.push(`ID: ${res.meeting_id}`);
+              if (res.password) parts.push(`Passcode: ${res.password}`);
+
+              const msg = `🎥 Zoom meeting created — ${parts.join("  •  ")}`;
+              await chatApi.send({ roomId: activeRoomId, text: msg });
+
+              setShowZoomModal(false);
+              setNotifications((p) => [
+                ...p,
+                { id: `n-${Date.now()}`, type: "success", message: "Zoom meeting created", timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) },
+              ]);
+            } catch (e) {
+              setErr(e?.response?.data?.message || e?.message || "Failed to create Zoom meeting");
             }
           }}
         />

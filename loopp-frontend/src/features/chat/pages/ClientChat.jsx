@@ -12,18 +12,24 @@ import {
 } from "@/lib/socket";
 import * as Projects from "@/services/projects.service";
 
+// shared UI
 import ConversationList from "@/features/chat/components/ConversationList";
 import ChatHeader from "@/features/chat/components/ChatHeader";
 import ChatInput from "@/features/chat/components/ChatInput";
 import MessageBubble from "@/features/chat/components/MessageBubble";
 
+// ui helpers
 import SearchBar from "@/features/chat/components/SearchBar";
 import InlineNotification from "@/features/chat/components/InlineNotification";
 import ChatBackground from "@/features/chat/components/ChatBackground";
 import UnreadMessagesIndicator from "@/features/chat/components/UnreadMessagesIndicator";
 import RatingModal from "../components/RatingModal";
 
-/* ----------------------------- tiny primitives ---------------------------- */
+/* -------------------------------------------------------------------------- */
+/*                               tiny primitives                              */
+/* -------------------------------------------------------------------------- */
+
+// Minimal portal (no external deps)
 function Portal({ children }) {
   const [mounted, setMounted] = useState(false);
   const elRef = useRef(null);
@@ -40,15 +46,24 @@ function Portal({ children }) {
     document.body.appendChild(elRef.current);
     setMounted(true);
     return () => {
-      try { document.body.removeChild(elRef.current); } catch {}
+      try {
+        document.body.removeChild(elRef.current);
+      } catch {}
     };
   }, []);
   if (!mounted) return null;
-  return <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>{children}</div>;
+  return (
+    <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+      {children}
+    </div>
+  );
 }
 
+// Viewport-bounded context menu (fixes overflow issues)
 function ContextMenu({ open, x, y, items, onClose }) {
   const menuRef = useRef(null);
+
+  // bound within viewport
   const [pos, setPos] = useState({ left: x, top: y });
 
   useEffect(() => {
@@ -58,7 +73,8 @@ function ContextMenu({ open, x, y, items, onClose }) {
       if (!menu) return;
       const { innerWidth: W, innerHeight: H } = window;
       const rect = menu.getBoundingClientRect();
-      let nx = x, ny = y;
+      let nx = x;
+      let ny = y;
       if (nx + rect.width > W - 8) nx = Math.max(8, W - rect.width - 8);
       if (ny + rect.height > H - 8) ny = Math.max(8, H - rect.height - 8);
       setPos({ left: nx, top: ny });
@@ -83,18 +99,27 @@ function ContextMenu({ open, x, y, items, onClose }) {
   }, [open, onClose]);
 
   if (!open) return null;
+
   return (
     <Portal>
       <div
         ref={menuRef}
-        style={{ position: "fixed", left: pos.left, top: pos.top, pointerEvents: "auto" }}
+        style={{
+          position: "fixed",
+          left: pos.left,
+          top: pos.top,
+          pointerEvents: "auto",
+        }}
         className="min-w-44 max-w-[70vw] rounded-xl border border-gray-200 bg-white shadow-2xl overflow-hidden"
       >
         <ul className="py-1">
           {items.map((it) => (
             <li key={it.id}>
               <button
-                onClick={() => { it.onClick?.(); onClose?.(); }}
+                onClick={() => {
+                  it.onClick?.();
+                  onClose?.();
+                }}
                 className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
               >
                 {it.label}
@@ -107,7 +132,142 @@ function ContextMenu({ open, x, y, items, onClose }) {
   );
 }
 
-/* ------------------------------ helpers/utils ----------------------------- */
+/* -------------------------------------------------------------------------- */
+/*                               error overlay                                */
+/* -------------------------------------------------------------------------- */
+
+function ConnectionErrorOverlay({
+  type = "generic",
+  message = "",
+  onRefresh,
+  onRetryJoin,
+}) {
+  const isJoin = type === "join_failed";
+  const isTimeout = type === "socket_timeout";
+  const headline =
+    (isTimeout && "We lost the live connection") ||
+    (isJoin && "We couldn’t join this room") ||
+    "Something broke";
+
+  const sub =
+    (isTimeout &&
+      "Your network may be slow or temporarily unstable, so the live socket didn’t connect in time. Click to continue chatting.") ||
+    (isJoin &&
+      "We connected to the server, but joining this room failed. You can retry joining or refresh the page.") ||
+    message ||
+    "Please try again.";
+
+  return (
+    <div className="absolute inset-0 z-50 grid place-items-center bg-white/80 backdrop-blur-sm">
+      {/* Inline keyframes for the animated tools */}
+      <style>{`
+        @keyframes gear-rotate { from { transform: rotate(0deg);} to { transform: rotate(360deg);} }
+        @keyframes wrench-wiggle {
+          0%,100% { transform: rotate(-8deg) translateY(0px); }
+          50% { transform: rotate(8deg) translateY(-1px); }
+        }
+        @keyframes spark-pop {
+          0% { opacity: 0; transform: scale(0.6) translateY(4px); }
+          40% { opacity: 1; transform: scale(1) translateY(0); }
+          100% { opacity: 0; transform: scale(1.2) translateY(-3px); }
+        }
+      `}</style>
+
+      <div className="mx-4 w-full max-w-lg rounded-2xl border border-gray-200 bg-white shadow-xl p-6 text-center">
+        {/* Animated Illustration */}
+        <div className="mx-auto mb-4 h-24 w-24 relative">
+          {/* Gear */}
+          <svg
+            viewBox="0 0 100 100"
+            className="absolute inset-0 h-full w-full"
+          >
+            <g
+              style={{ transformOrigin: "50px 50px", animation: "gear-rotate 3.5s linear infinite" }}
+            >
+              <circle cx="50" cy="50" r="16" fill="#e5e7eb" />
+              {[...Array(8)].map((_, i) => {
+                const a = (i * Math.PI) / 4;
+                const x = 50 + Math.cos(a) * 28;
+                const y = 50 + Math.sin(a) * 28;
+                return (
+                  <rect
+                    key={i}
+                    x={x - 4}
+                    y={y - 8}
+                    width="8"
+                    height="16"
+                    rx="2"
+                    transform={`rotate(${(a * 180) / Math.PI} ${x} ${y})`}
+                    fill="#d1d5db"
+                  />
+                );
+              })}
+              <circle cx="50" cy="50" r="10" fill="#f3f4f6" />
+            </g>
+          </svg>
+
+          {/* Wrench */}
+          <svg
+            viewBox="0 0 120 120"
+            className="absolute -bottom-1 -right-2 h-14 w-14"
+            style={{ transformOrigin: "20px 100px", animation: "wrench-wiggle 1.6s ease-in-out infinite" }}
+          >
+            <path
+              d="M85 30a14 14 0 0 0-18 18l-30 30a8 8 0 1 0 11 11l30-30a14 14 0 0 0 7-29z"
+              fill="#9ca3af"
+            />
+            <circle cx="80" cy="34" r="4" fill="#f9fafb" />
+          </svg>
+
+          {/* Sparks */}
+          {[0, 1, 2].map((i) => (
+            <svg
+              key={i}
+              viewBox="0 0 24 24"
+              className="absolute left-1/4 top-1/4 h-4 w-4"
+              style={{
+                left: `${30 + i * 14}px`,
+                top: `${18 + (i % 2) * 10}px`,
+                animation: `spark-pop 1.2s ease-in-out ${i * 0.2}s infinite`,
+              }}
+            >
+              <path d="M12 2l2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5z" fill="#f59e0b" />
+            </svg>
+          ))}
+        </div>
+
+        <h3 className="text-lg font-semibold text-gray-900">{headline}</h3>
+        <p className="mt-1 text-sm text-gray-600">{sub}</p>
+
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+          <button
+            onClick={onRefresh}
+            className="px-4 py-2 rounded-xl bg-black text-white hover:bg-gray-800"
+          >
+            Refresh page
+          </button>
+          {isJoin && (
+            <button
+              onClick={onRetryJoin}
+              className="px-4 py-2 rounded-xl border border-gray-300 bg-white hover:bg-gray-50"
+            >
+              Retry joining room
+            </button>
+          )}
+        </div>
+
+        <div className="mt-3 text-[11px] text-gray-500">
+          Tip: If this keeps happening, check your internet connection or try switching networks.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                tiny helpers                                */
+/* -------------------------------------------------------------------------- */
+
 const shortName = (s, m = 28) => {
   const t = (s || "").toString().trim();
   return t.length <= m ? t : t.slice(0, m - 1) + "…";
@@ -126,6 +286,7 @@ const normalizeRole = (r = "") => {
 };
 const isStaff = (role) => STAFF_ROLES.includes(role);
 
+// normalize + theme
 const roleToTheme = (role, isMine) => {
   if (role === "System") return "system";
   if (isMine) return "me";
@@ -136,49 +297,54 @@ const roleToTheme = (role, isMine) => {
   return "client";
 };
 
+// status normalization: accept status OR deliveryStatus
+function normalizeStatus(m) {
+  const raw = (m?.status || m?.deliveryStatus || "").toString().toLowerCase();
+  if (raw === "sending") return "pending";
+  if (raw === "pending") return "pending";
+  if (raw === "sent") return "sent";
+  if (raw === "delivered") return "delivered";
+  if (raw === "read") return "read";
+  if (raw === "failed" || raw === "error") return "failed";
+  // fallback: if it's mine and we have an id, treat as sent, else pending
+  if (m?.isMine) return m?._id ? "sent" : "pending";
+  return "";
+}
+
+// NEW: fuzzy-time helper + reconciliation for my echoed messages
 const closeInTime = (aISO, bISO, ms = 15000) => {
   const a = new Date(aISO || Date.now()).getTime();
   const b = new Date(bISO || Date.now()).getTime();
   return Math.abs(a - b) <= ms;
 };
 
-const STATUS_ONLINE = "online";
-const STATUS_AWAY = "away";
-const STATUS_OFFLINE = "offline";
-
-/* --------------------------- presence mini-store -------------------------- */
-function upsertMember(map, roomId, idKey, role, name, status) {
-  const cur = map[roomId] || { members: [] };
-  const members = [...cur.members];
-  const idx = members.findIndex((m) => (m.id || m.role) === idKey);
-  const next = { id: idKey, role, name, status };
-  if (idx === -1) members.push(next);
-  else members[idx] = { ...members[idx], ...next };
-  return { ...map, [roomId]: { members } };
-}
-function setStatus(map, roomId, idKey, status) {
-  const cur = map[roomId] || { members: [] };
-  const members = cur.members.map((m) => ((m.id || m.role) === idKey ? { ...m, status } : m));
-  return { ...map, [roomId]: { members } };
-}
-function ensureSeedParticipants(map, roomId, meta) {
-  let next = { ...map };
-  next = upsertMember(next, roomId, "Client", "Client", "You", STATUS_ONLINE);
-  const pm = meta?.pm || meta?.project?.pm || meta?.room?.pm || meta?.userPM;
-  if (pm) {
-    const pmName = [pm.firstName, pm.lastName].filter(Boolean).join(" ").trim() || "PM";
-    next = upsertMember(next, roomId, "PM", "PM", pmName, STATUS_AWAY);
-  }
-  const eng = meta?.engineer || meta?.project?.engineer || meta?.room?.engineer;
-  if (eng) {
-    const engName = [eng.firstName, eng.lastName].filter(Boolean).join(" ").trim() || "Engineer";
-    next = upsertMember(next, roomId, "Engineer", "Engineer", engName, STATUS_AWAY);
-  }
+function reconcileMineWithoutNonce(prev, shaped) {
+  if (!shaped.isMine) return prev;
+  const idxFromEnd = [...prev]
+    .reverse()
+    .findIndex(
+      (m) =>
+        m.isMine &&
+        (m.content || "").trim() === (shaped.content || "").trim() &&
+        closeInTime(m.createdAtISO, shaped.createdAtISO, 15000)
+    );
+  if (idxFromEnd === -1) return prev;
+  const realIdx = prev.length - 1 - idxFromEnd;
+  const next = prev.slice();
+  next[realIdx] = {
+    ...prev[realIdx],
+    _id: shaped._id,
+    createdAtISO: shaped.createdAtISO || prev[realIdx].createdAtISO,
+    timestamp: shaped.timestamp || prev[realIdx].timestamp,
+    clientNonce: shaped.clientNonce || prev[realIdx].clientNonce,
+    status: normalizeStatus(shaped) || "sent",
+    deliveryStatus: shaped.deliveryStatus || "sent",
+    attachments: Array.isArray(shaped.attachments) ? shaped.attachments : prev[realIdx].attachments,
+  };
   return next;
 }
 
-/* --------------------- message shaping / reconciliation -------------------- */
-function shapeForClient(m) {
+const shapeForClient = (m) => {
   const created =
     m.createdAt || m.createdAtISO || m.timestamp || new Date().toISOString();
   const isSystem = String(m.senderType || "").toLowerCase() === "system";
@@ -203,24 +369,25 @@ function shapeForClient(m) {
 
   const attachments = Array.isArray(m.attachments) ? m.attachments : [];
 
-  // deliveryStatus from server if present; default "sent" for any echo we receive
-  const deliveryStatus = m.deliveryStatus || "sent";
-
   return {
     _id: m._id || m.id || `${Date.now()}-${Math.random()}`,
     room: String(m.room?._id || m.room || ""),
     content: m.text || m.content || "",
-    timestamp: new Date(created).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    timestamp: new Date(created).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
     createdAtISO: new Date(created).toISOString(),
-    isMine: mine,
+    isMine: "isMine" in m ? !!m.isMine : mine,
     senderRole: role || "Client",
     senderName,
     attachments,
-    bubbleTheme: roleToTheme(role || "", mine),
+    bubbleTheme: roleToTheme(role || "", "isMine" in m ? !!m.isMine : mine),
     clientNonce: m.clientNonce || m.nonce || undefined,
-    deliveryStatus, // "sending" | "sent" | "failed"
+    status: normalizeStatus(m),
+    deliveryStatus: m.deliveryStatus || undefined,
   };
-}
+};
 
 const msgSignature = (m) =>
   [
@@ -232,13 +399,17 @@ const msgSignature = (m) =>
     String(Array.isArray(m.attachments) ? m.attachments.length : 0),
   ].join("|");
 
+// UPDATED: smarter safeAppend with nonce + fuzzy path
 function safeAppend(setMessages, incoming) {
   setMessages((prev) => {
+    // id match
     if (prev.some((x) => x._id === incoming._id)) return prev;
 
-    // perfect reconcile via clientNonce
+    // nonce match (best)
     if (incoming.clientNonce) {
-      const nIdx = prev.findIndex((x) => x.clientNonce && x.clientNonce === incoming.clientNonce);
+      const nIdx = prev.findIndex(
+        (x) => x.clientNonce && x.clientNonce === incoming.clientNonce
+      );
       if (nIdx !== -1) {
         const next = prev.slice();
         next[nIdx] = {
@@ -247,15 +418,17 @@ function safeAppend(setMessages, incoming) {
           createdAtISO: incoming.createdAtISO || next[nIdx].createdAtISO,
           timestamp: incoming.timestamp || next[nIdx].timestamp,
           clientNonce: incoming.clientNonce,
-          deliveryStatus: "sent",
-          attachments: incoming.attachments?.length ? incoming.attachments : next[nIdx].attachments,
-          content: incoming.content ?? next[nIdx].content,
+          status: normalizeStatus(incoming) || "sent",
+          deliveryStatus: incoming.deliveryStatus || "sent",
+          attachments: Array.isArray(incoming.attachments)
+            ? incoming.attachments
+            : next[nIdx].attachments,
         };
         return next;
       }
     }
 
-    // fuzzy dedupe (mine, time-close, same content)
+    // fuzzy dedupe for my recent message without nonce echo
     const dupIdx = prev.findIndex(
       (x) =>
         x.isMine === true &&
@@ -271,14 +444,16 @@ function safeAppend(setMessages, incoming) {
         createdAtISO: incoming.createdAtISO || next[dupIdx].createdAtISO,
         timestamp: incoming.timestamp || next[dupIdx].timestamp,
         clientNonce: incoming.clientNonce || next[dupIdx].clientNonce,
-        deliveryStatus: "sent",
-        attachments: incoming.attachments?.length ? incoming.attachments : next[dupIdx].attachments,
-        content: incoming.content ?? next[dupIdx].content,
+        status: normalizeStatus(incoming) || "sent",
+        deliveryStatus: incoming.deliveryStatus || "sent",
+        attachments: Array.isArray(incoming.attachments)
+          ? incoming.attachments
+          : next[dupIdx].attachments,
       };
       return next;
     }
 
-    // legacy signature
+    // legacy signature check (kept as last line of defense)
     const sig = msgSignature(incoming);
     if (prev.some((x) => msgSignature(x) === sig)) return prev;
 
@@ -287,11 +462,12 @@ function safeAppend(setMessages, incoming) {
 }
 
 function previewText(m) {
-  if (m.attachments?.length && !m.content) return `📎 ${m.attachments.length} attachment(s)`;
+  if (m.attachments?.length && !m.content)
+    return `📎 ${m.attachments.length} attachment(s)`;
   return m.content || "—";
 }
 
-/* ----------------------- grouping + tiny notices etc. ---------------------- */
+/* ---------- date grouping for separators (UI-only) --- */
 const formatDateSeparator = (date) => {
   const today = new Date();
   const yesterday = new Date(today);
@@ -299,20 +475,24 @@ const formatDateSeparator = (date) => {
 
   const isToday = date.toDateString() === today.toDateString();
   const isYesterday = date.toDateString() === yesterday.toDateString();
+
   if (isToday) return "Today";
   if (isYesterday) return "Yesterday";
 
   const weekAgo = new Date(today);
   weekAgo.setDate(weekAgo.getDate() - 7);
+
   if (date > weekAgo) {
     return date.toLocaleDateString("en-US", { weekday: "long" });
   }
+
   return date.toLocaleDateString("en-US", {
     month: "long",
     day: "numeric",
     year: "numeric",
   });
 };
+
 const groupMessagesByDate = (messages) => {
   const groups = {};
   messages.forEach((msg) => {
@@ -327,11 +507,13 @@ const groupMessagesByDate = (messages) => {
   }));
 };
 
+/* ----- Inline dashed notices (presence banners) ---- */
 function InlineNotice({ text }) {
   return (
     <div className="my-3 flex items-center justify-center">
       <div className="w-full text-center text-[11px] md:text-xs tracking-wide text-black/65">
-        {"—".repeat(6)} <span className="font-semibold uppercase">{text}</span> {"—".repeat(6)}
+        {"—".repeat(6)} <span className="font-semibold uppercase">{text}</span>{" "}
+        {"—".repeat(6)}
       </div>
     </div>
   );
@@ -340,18 +522,27 @@ function noticeFromSystemEvent(ev = {}) {
   const type = String(ev.type || "").toLowerCase();
   const eng = ev.engineer || {};
   const engName = [eng.firstName, eng.lastName].filter(Boolean).join(" ").trim();
+
   switch (type) {
-    case "pm_assigned": return "A PM HAS BEEN ASSIGNED";
-    case "pm_online": return "PM IS ACTIVELY ONLINE";
-    case "pm_assigned_engineer": return `PM HAS ASSIGNED THE PROJECT TO AN ENGINEER${engName ? ` — (${engName})` : ""}`;
-    case "engineer_accepted": return "ENGINEER HAS ACCEPTED THE TASK AND WILL BE JOINING THE ROOM";
+    case "pm_assigned":
+      return "A PM HAS BEEN ASSIGNED";
+    case "pm_online":
+      return "PM IS ACTIVELY ONLINE";
+    case "pm_assigned_engineer":
+      return `PM HAS ASSIGNED THE PROJECT TO AN ENGINEER${
+        engName ? ` — (${engName})` : ""
+      }`;
+    case "engineer_accepted":
+      return "ENGINEER HAS ACCEPTED THE TASK AND WILL BE JOINING THE ROOM";
     case "engineer_joined":
-    case "engineer_online": return "ENGINEER IS IN THE ROOM";
-    default: return "";
+    case "engineer_online":
+      return "ENGINEER IS IN THE ROOM";
+    default:
+      return "";
   }
 }
 
-/* ------------------------------- tiny toast ------------------------------- */
+/* ---------------------- tiny toast ---------------------- */
 function useToast() {
   const [toast, setToast] = useState(null);
   useEffect(() => {
@@ -362,7 +553,209 @@ function useToast() {
   return [toast, setToast];
 }
 
-/* ------------------------------- main view -------------------------------- */
+/* ------------------ Rating UI (kept) ------------------ */
+function Stars({ value, onChange, label }) {
+  return (
+    <div className="space-y-2">
+      <div className="text-xs text-black/60">{label}</div>
+      <div className="flex gap-1">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => onChange(n)}
+            className={`w-9 h-9 rounded-full border border-black/20 grid place-items-center transition
+              ${
+                value >= n
+                  ? "bg-black text-white"
+                  : "bg-white hover:bg-black/[0.05]"
+              }`}
+            aria-label={`${label}: ${n} star${n > 1 ? "s" : ""}`}
+          >
+            ★
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+function RatingSheet({ requestId, onClose, onRated }) {
+  const [pmScore, setPmScore] = useState(0);
+  const [engScore, setEngScore] = useState(0);
+  const [teamScore, setTeamScore] = useState(0);
+  const [pmComment, setPmComment] = useState("");
+  const [engComment, setEngComment] = useState("");
+  const [coordComment, setCoordComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState("");
+
+  const canSubmit =
+    pmScore > 0 &&
+    engScore > 0 &&
+    teamScore > 0 &&
+    pmComment.trim() &&
+    engComment.trim() &&
+    coordComment.trim();
+
+  const submit = async () => {
+    if (!canSubmit) {
+      setErr("Please rate each category (1–5) and provide all three comments.");
+      return;
+    }
+    try {
+      setSubmitting(true);
+      setErr("");
+      await Projects.rate({
+        requestId,
+        pmScore,
+        pmComment,
+        engineerScore: engScore,
+        engineerComment: engComment,
+        coordinationScore: teamScore,
+        coordinationComment: coordComment,
+      });
+      onRated?.();
+    } catch (e) {
+      setErr(
+        e?.response?.data?.message || e?.message || "Failed to submit rating"
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-x-0 bottom-0 z-[60] md:left-[max(0px,calc(50%-44rem))] md:right-[max(0px,calc(50%-44rem))] bg-white border-t border-black/10 shadow-[0_-8px_30px_rgba(0,0,0,0.12)] animate-slide-in"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="p-4 md:p-6">
+        <div className="flex items-start justify-between">
+          <div>
+            <h4 className="text-lg font-semibold text-black">Rate your experience</h4>
+            <p className="text-sm text-black/60">
+              Please rate your Project Manager, Engineer, and Teamwork.
+              Comments are required.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 rounded-lg border border-black/20 hover:bg-black/[0.03]"
+            aria-label="Close rating"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-5">
+          <Stars label="PM" value={pmScore} onChange={setPmScore} />
+          <Stars label="Engineer" value={engScore} onChange={setEngScore} />
+          <Stars label="Teamwork" value={teamScore} onChange={setTeamScore} />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+          <div>
+            <div className="text-xs text-black/60 mb-2">PM Comment</div>
+            <textarea
+              rows={4}
+              className="w-full px-3 py-2 rounded-xl border border-black/20"
+              value={pmComment}
+              onChange={(e) => setPmComment(e.target.value)}
+            />
+          </div>
+          <div>
+            <div className="text-xs text-black/60 mb-2">Engineer Comment</div>
+            <textarea
+              rows={4}
+              className="w-full px-3 py-2 rounded-xl border border-black/20"
+              value={engComment}
+              onChange={(e) => setEngComment(e.target.value)}
+            />
+          </div>
+          <div>
+            <div className="text-xs text-black/60 mb-2">Teamwork Comment</div>
+            <textarea
+              rows={4}
+              className="w-full px-3 py-2 rounded-xl border border-black/20"
+              value={coordComment}
+              onChange={(e) => setCoordComment(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {err && (
+          <div className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+            {err}
+          </div>
+        )}
+
+        <div className="mt-5 flex justify-end">
+          <button
+            onClick={submit}
+            disabled={!canSubmit || submitting}
+            className="px-4 py-2 rounded-xl bg-black text-white disabled:opacity-60"
+          >
+            {submitting ? "Submitting…" : "Submit Rating"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------- presence utilities --------------------------- */
+/**
+ * Three-state presence:
+ * - ONLINE: actively in this room
+ * - AWAY: online but not in this room
+ * - OFFLINE: not online
+ *
+ * We track presence by room with a small member list. Each item:
+ *   { id: "PM"|"Engineer"|"Client"|string, role, name, status }
+ */
+const STATUS_ONLINE = "online";
+const STATUS_AWAY = "away";
+const STATUS_OFFLINE = "offline";
+
+function upsertMember(map, roomId, idKey, role, name, status) {
+  const cur = map[roomId] || { members: [] };
+  const members = [...cur.members];
+  const idx = members.findIndex((m) => (m.id || m.role) === idKey);
+  const next = { id: idKey, role, name, status };
+  if (idx === -1) members.push(next);
+  else members[idx] = { ...members[idx], ...next };
+  return { ...map, [roomId]: { members } };
+}
+
+function setStatus(map, roomId, idKey, status) {
+  const cur = map[roomId] || { members: [] };
+  const members = cur.members.map((m) =>
+    (m.id || m.role) === idKey ? { ...m, status } : m
+  );
+  return { ...map, [roomId]: { members } };
+}
+
+function ensureSeedParticipants(map, roomId, meta) {
+  let next = { ...map };
+  // Always seed client (You) => ONLINE in this room
+  next = upsertMember(next, roomId, "Client", "Client", "You", STATUS_ONLINE);
+
+  // Seed PM/Engineer as AWAY by default (online but not yet active in this room)
+  const pm = meta?.pm || meta?.project?.pm || meta?.room?.pm || meta?.userPM;
+  if (pm) {
+    const pmName = [pm.firstName, pm.lastName].filter(Boolean).join(" ").trim() || "PM";
+    next = upsertMember(next, roomId, "PM", "PM", pmName, STATUS_AWAY);
+  }
+  const eng = meta?.engineer || meta?.project?.engineer || meta?.room?.engineer;
+  if (eng) {
+    const engName = [eng.firstName, eng.lastName].filter(Boolean).join(" ").trim() || "Engineer";
+    next = upsertMember(next, roomId, "Engineer", "Engineer", engName, STATUS_AWAY);
+  }
+  return next;
+}
+
+/* ----------------------- main component ----------------------- */
 export default function ClientChat() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -370,7 +763,11 @@ export default function ClientChat() {
   const [rooms, setRooms] = useState([]);
   const [activeRoomId, setActiveRoomId] = useState(null);
 
-  const [header, setHeader] = useState({ name: "Chat", status: "Online", avatar: "" });
+  const [header, setHeader] = useState({
+    name: "Chat",
+    status: "Online",
+    avatar: "",
+  });
   const [messages, setMessages] = useState([]);
 
   const [typingByRoom, setTypingByRoom] = useState({});
@@ -380,6 +777,7 @@ export default function ClientChat() {
   const [hasRated, setHasRated] = useState(false);
   const [reopenRequested, setReopenRequested] = useState(false);
 
+  // UI
   const [showSearch, setShowSearch] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [notifications, setNotifications] = useState([]);
@@ -387,9 +785,11 @@ export default function ClientChat() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isAtBottom, setIsAtBottom] = useState(true);
 
+  // Presence (role-keyed & 3-state)
   const [presenceByRoom, setPresenceByRoom] = useState({});
   const [presenceOpen, setPresenceOpen] = useState(false);
 
+  // Context menu
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
   const lastRightClickText = useRef("");
@@ -399,11 +799,9 @@ export default function ClientChat() {
   const lastCountRef = useRef(0);
   const messageRefs = useRef({});
 
-  const [fatal, setFatal] = useState(null);
+  // NEW: fatal overlay state + reconnection ticker
+  const [fatal, setFatal] = useState(null); // { type: 'socket_timeout'|'join_failed'|'generic', message?:string }
   const [reconnectTick, setReconnectTick] = useState(0);
-
-  // NEW: local outbox so we can retry sends (keeps original files)
-  const outboxRef = useRef(new Map()); // nonce -> { text, files }
 
   const typingText = useMemo(() => {
     if (!activeRoomId) return "";
@@ -412,9 +810,12 @@ export default function ClientChat() {
     if (!others.length) return "";
     const first = others[0];
     const label = first.role || "PM/Engineer";
-    return others.length === 1 ? `${label} is typing…` : `${label} and ${others.length - 1} other(s) are typing…`;
+    return others.length === 1
+      ? `${label} is typing…`
+      : `${label} and ${others.length - 1} other(s) are typing…`;
   }, [typingByRoom, activeRoomId]);
 
+  /* ------------------ typing expiry ticker ------------------ */
   useEffect(() => {
     const id = setInterval(() => {
       setTypingByRoom((prev) => {
@@ -425,6 +826,7 @@ export default function ClientChat() {
           const map = { ...next[rid] };
           for (const uid of Object.keys(map)) {
             if (map[uid].until < now) {
+              // decay presence to AWAY (not OFFLINE) when typing expires
               setPresenceByRoom((p) => setStatus(p, rid, uid, STATUS_AWAY));
               delete map[uid];
               changed = true;
@@ -442,18 +844,27 @@ export default function ClientChat() {
   useEffect(() => {
     (async () => {
       try {
-        setLoading(true); setErr("");
+        setLoading(true);
+        setErr("");
+
         const data = await fetchMyClientRooms();
         const list = Array.isArray(data?.rooms) ? data.rooms : [];
-        list.sort((a, b) =>
-          new Date(b.updatedAtISO || b.updatedAt) - new Date(a.updatedAtISO || a.updatedAt)
+        list.sort(
+          (a, b) =>
+            new Date(b.updatedAtISO || b.updatedAt) -
+            new Date(a.updatedAtISO || a.updatedAt)
         );
         setRooms(list);
+
         const firstReal = list.find((r) => r.hasRoom);
         setActiveRoomId(firstReal?.id || null);
       } catch (e) {
-        setErr(e?.response?.data?.message || e?.message || "Failed to load rooms");
-      } finally { setLoading(false); }
+        setErr(
+          e?.response?.data?.message || e?.message || "Failed to load rooms"
+        );
+      } finally {
+        setLoading(false);
+      }
     })();
   }, []);
 
@@ -467,21 +878,30 @@ export default function ClientChat() {
 
     (async () => {
       try {
-        setErr(""); setFatal(null);
+        setErr("");
+        setFatal(null); // clear any previous fatal state before attempting
 
         const res = await fetchClientRoomMessages(activeRoomId, { limit: 100 });
         const shaped = (res?.messages || []).map(shapeForClient);
         setMessages(shaped);
 
+        // Room meta – seed participants (PM/Engineer if available) + Client (You)
         let roomMeta = {};
         try {
           const metaRes = await Projects.getRoomMeta(activeRoomId);
           roomMeta = metaRes?.data?.room || metaRes?.room || metaRes || {};
         } catch {}
 
-        setPresenceByRoom((prev) => ensureSeedParticipants(prev, activeRoomId, roomMeta));
+        setPresenceByRoom((prev) => {
+          // Client = ONLINE, PM/Engineer = AWAY by default
+          let next = ensureSeedParticipants(prev, activeRoomId, roomMeta);
+          return next;
+        });
 
-        let closed = Boolean(active?.isClosed === true || active?.isClosed === "true");
+        // header + reopen flag
+        let closed = Boolean(
+          active?.isClosed === true || active?.isClosed === "true"
+        );
         let reopen = !!roomMeta?.reopenRequested;
         if (typeof roomMeta?.isClosed === "boolean") closed = roomMeta.isClosed;
 
@@ -492,11 +912,13 @@ export default function ClientChat() {
         });
         setReopenRequested(reopen);
 
+        // scroller & scroll listener
         const el = scrollerRef.current;
         if (el) {
           const onScroll = () => {
             const threshold = 120;
-            const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+            const atBottom =
+              el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
             atBottomRef.current = atBottom;
             setIsAtBottom(atBottom);
             if (atBottom) setUnreadCount(0);
@@ -507,31 +929,49 @@ export default function ClientChat() {
             atBottomRef.current = true;
             setIsAtBottom(true);
           });
-          unsub = () => { try { el.removeEventListener("scroll", onScroll); } catch {} };
+          unsub = () => {
+            try {
+              el.removeEventListener("scroll", onScroll);
+            } catch {}
+          };
         }
 
+        // ---- SOCKET CONNECT (catch timeout -> fatal overlay) ----
         try {
-          connectSocket();
+          const s = connectSocket();
           await waitForSocketConnected(getSocket());
         } catch (e) {
-          setFatal({ type: "socket_timeout", message: e?.message || "The live connection timed out." });
-          return;
+          setFatal({
+            type: "socket_timeout",
+            message:
+              e?.message ||
+              "The live connection couldn’t be established before timing out.",
+          });
+          return; // stop wiring listeners
         }
 
+        // ---- JOIN ROOM (catch failure -> fatal overlay with rejoin CTA) ----
         try {
           await joinSocketRoom(activeRoomId);
         } catch (e) {
-          setFatal({ type: "join_failed", message: e?.response?.data?.message || e?.message || "Join failed." });
-          return;
+          setFatal({
+            type: "join_failed",
+            message:
+              e?.response?.data?.message ||
+              e?.message ||
+              "We couldn’t join this chat room.",
+          });
+          return; // stop wiring listeners
         }
 
         const s = getSocket();
 
+        // message (UPDATED: nonce + fuzzy reconcile + status)
         const onMessage = (m) => {
           const rid = String(m.room?._id || m.room);
           const shapedMsg = shapeForClient(m);
 
-          // Update room card recency
+          // keep list ordering fresh
           setRooms((prev) => {
             const idx = prev.findIndex((x) => String(x.id) === rid);
             if (idx === -1) return prev;
@@ -546,31 +986,94 @@ export default function ClientChat() {
 
           if (rid !== String(activeRoomId)) return;
 
-          // Apply reconcile (will turn local "sending" into "sent")
-          safeAppend(setMessages, shapedMsg);
+          // Reconcile by nonce if present, else fuzzy for "mine"
+          setMessages((prev) => {
+            // id already present?
+            if (prev.some((x) => x._id === shapedMsg._id)) {
+              // if came later with better status, update it
+              return prev.map((x) =>
+                x._id === shapedMsg._id
+                  ? { ...x, status: normalizeStatus(shapedMsg) || x.status, deliveryStatus: shapedMsg.deliveryStatus || x.deliveryStatus }
+                  : x
+              );
+            }
 
-          if (shapedMsg.clientNonce) {
-            // clear outbox on success
-            outboxRef.current.delete(shapedMsg.clientNonce);
-          }
+            if (shapedMsg.clientNonce) {
+              const nIdx = prev.findIndex(
+                (x) => x.clientNonce && x.clientNonce === shapedMsg.clientNonce
+              );
+              if (nIdx !== -1) {
+                const next = prev.slice();
+                next[nIdx] = {
+                  ...next[nIdx],
+                  _id: shapedMsg._id,
+                  createdAtISO: shapedMsg.createdAtISO || next[nIdx].createdAtISO,
+                  timestamp: shapedMsg.timestamp || next[nIdx].timestamp,
+                  clientNonce: shapedMsg.clientNonce,
+                  status: normalizeStatus(shapedMsg) || "sent",
+                  deliveryStatus: shapedMsg.deliveryStatus || "sent",
+                  attachments: Array.isArray(shapedMsg.attachments) ? shapedMsg.attachments : next[nIdx].attachments,
+                };
+                return next;
+              }
+            }
+
+            // fuzzy for my echoed message without nonce
+            const idxFromEnd = [...prev]
+              .reverse()
+              .findIndex(
+                (x) =>
+                  x.isMine &&
+                  shapedMsg.isMine &&
+                  (x.content || "").trim() === (shapedMsg.content || "").trim() &&
+                  closeInTime(x.createdAtISO, shapedMsg.createdAtISO, 15000)
+              );
+
+            if (idxFromEnd !== -1) {
+              const realIdx = prev.length - 1 - idxFromEnd;
+              const next = prev.slice();
+              next[realIdx] = {
+                ...next[realIdx],
+                _id: shapedMsg._id,
+                createdAtISO: shapedMsg.createdAtISO || prev[realIdx].createdAtISO,
+                timestamp: shapedMsg.timestamp || prev[realIdx].timestamp,
+                clientNonce: shapedMsg.clientNonce || prev[realIdx].clientNonce,
+                status: normalizeStatus(shapedMsg) || "sent",
+                deliveryStatus: shapedMsg.deliveryStatus || "sent",
+                attachments: Array.isArray(shapedMsg.attachments) ? shapedMsg.attachments : prev[realIdx].attachments,
+              };
+              return next;
+            }
+
+            // last resort: signature
+            const sig = msgSignature(shapedMsg);
+            if (prev.some((x) => msgSignature(x) === sig)) return prev;
+
+            return [...prev, shapedMsg];
+          });
 
           if (atBottomRef.current || shapedMsg.isMine) {
             requestAnimationFrame(() => {
-              scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
-              setIsAtBottom(true); setUnreadCount(0);
+              scrollerRef.current?.scrollTo({
+                top: scrollerRef.current.scrollHeight,
+                behavior: "smooth",
+              });
+              setIsAtBottom(true);
+              setUnreadCount(0);
             });
           } else {
             setUnreadCount((c) => c + 1);
           }
         };
 
+        // typing -> mark role ONLINE in this room; decay to AWAY via ticker above
         const onTyping = ({ roomId, role, isTyping, name }) => {
           const displayRole = normalizeRole(role) || "PM/Engineer";
           if (String(roomId) !== String(activeRoomId)) return;
 
           setTypingByRoom((prev) => {
             const map = { ...(prev[roomId] || {}) };
-            const key = displayRole;
+            const key = displayRole; // stable key by role
             if (isTyping) map[key] = { role: displayRole, until: Date.now() + 2500 };
             else delete map[key];
             return { ...prev, [roomId]: map };
@@ -579,17 +1082,26 @@ export default function ClientChat() {
           if (isTyping) {
             const idKey = displayRole;
             setPresenceByRoom((prev) =>
-              upsertMember(prev, activeRoomId, idKey, displayRole, name || displayRole, STATUS_ONLINE)
+              upsertMember(
+                prev,
+                activeRoomId,
+                idKey,
+                displayRole,
+                name || displayRole,
+                STATUS_ONLINE
+              )
             );
           }
         };
 
+        // system events: update inline notices + presence states
         const onSystem = (payload = {}) => {
           const rid = String(payload.roomId || payload.room || "");
           const type = String(payload.type || "").toLowerCase();
           const pm = payload.pm || payload.user || {};
           const eng = payload.engineer || {};
 
+          // inline banner only for this room
           if (!rid || rid === String(activeRoomId)) {
             const label = noticeFromSystemEvent(payload);
             if (label) {
@@ -607,24 +1119,36 @@ export default function ClientChat() {
               });
               if (atBottomRef.current) {
                 requestAnimationFrame(() => {
-                  scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
+                  scrollerRef.current?.scrollTo({
+                    top: scrollerRef.current.scrollHeight,
+                    behavior: "smooth",
+                  });
                 });
               }
             }
           }
 
+          // presence updates (role-keyed)
           setPresenceByRoom((prev) => {
             let next = { ...prev };
             const pmName = [pm?.firstName, pm?.lastName].filter(Boolean).join(" ").trim() || "PM";
             const engName = [eng?.firstName, eng?.lastName].filter(Boolean).join(" ").trim() || "Engineer";
 
             if (!rid || rid === String(activeRoomId)) {
-              if (type === "pm_assigned") next = upsertMember(next, activeRoomId, "PM", "PM", pmName, STATUS_AWAY);
-              if (type === "pm_online") next = upsertMember(next, activeRoomId, "PM", "PM", pmName, STATUS_ONLINE);
-              if (type === "pm_assigned_engineer" || type === "engineer_joined")
+              if (type === "pm_assigned") {
+                // PM exists but may not be in the room yet -> AWAY
+                next = upsertMember(next, activeRoomId, "PM", "PM", pmName, STATUS_AWAY);
+              }
+              if (type === "pm_online") {
+                // When we do receive it (if broadcast), consider ACTIVE in room now
+                next = upsertMember(next, activeRoomId, "PM", "PM", pmName, STATUS_ONLINE);
+              }
+              if (type === "pm_assigned_engineer" || type === "engineer_joined") {
                 next = upsertMember(next, activeRoomId, "Engineer", "Engineer", engName, STATUS_ONLINE);
-              if (type === "engineer_online")
+              }
+              if (type === "engineer_online") {
                 next = upsertMember(next, activeRoomId, "Engineer", "Engineer", engName, STATUS_ONLINE);
+              }
             }
             return next;
           });
@@ -633,27 +1157,51 @@ export default function ClientChat() {
         const onRoomClosed = (payload = {}) => {
           const rid = String(payload.roomId || payload.room || "");
           if (rid && rid !== String(activeRoomId)) return;
-          setRooms((prev) => prev.map((r) => (String(r.id) === String(activeRoomId) ? { ...r, isClosed: true } : r)));
+
+          setRooms((prev) =>
+            prev.map((r) =>
+              String(r.id) === String(activeRoomId) ? { ...r, isClosed: true } : r
+            )
+          );
           setHeader((h) => ({ ...h, status: "Closed" }));
           setToast({ text: "This room has been closed.", kind: "warn" });
           setNotifications((n) => [
             ...n,
-            { id: `notif-${Date.now()}`, type: "warning", message: "Room closed",
-              timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) },
+            {
+              id: `notif-${Date.now()}`,
+              type: "warning",
+              message: "Room closed",
+              timestamp: new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            },
           ]);
         };
 
         const onRoomReopened = (payload = {}) => {
           const rid = String(payload.roomId || payload.room || "");
           if (rid && rid !== String(activeRoomId)) return;
-          setRooms((prev) => prev.map((r) => (String(r.id) === String(activeRoomId) ? { ...r, isClosed: false } : r)));
+
+          setRooms((prev) =>
+            prev.map((r) =>
+              String(r.id) === String(activeRoomId) ? { ...r, isClosed: false } : r
+            )
+          );
           setReopenRequested(false);
           setHeader((h) => ({ ...h, status: "Online" }));
           setToast({ text: "This room has been reopened.", kind: "ok" });
           setNotifications((n) => [
             ...n,
-            { id: `notif-${Date.now()}`, type: "success", message: "Room reopened",
-              timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) },
+            {
+              id: `notif-${Date.now()}`,
+              type: "success",
+              message: "Room reopened",
+              timestamp: new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            },
           ]);
         };
 
@@ -664,8 +1212,15 @@ export default function ClientChat() {
           setToast({ text: "Reopen request sent.", kind: "ok" });
           setNotifications((n) => [
             ...n,
-            { id: `notif-${Date.now()}`, type: "success", message: "Reopen request sent",
-              timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) },
+            {
+              id: `notif-${Date.now()}`,
+              type: "success",
+              message: "Reopen request sent",
+              timestamp: new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            },
           ]);
         };
 
@@ -680,8 +1235,11 @@ export default function ClientChat() {
           setRooms((prev) =>
             prev.map((r) =>
               String(r.id) === String(activeRoomId)
-                ? { ...r, lastMessage: `${pmName} has been assigned as your PM. They’ll join shortly.`,
-                    updatedAtISO: payload?.at || new Date().toISOString() }
+                ? {
+                    ...r,
+                    lastMessage: `${pmName} has been assigned as your PM. They’ll join shortly.`,
+                    updatedAtISO: payload?.at || new Date().toISOString(),
+                  }
                 : r
             )
           );
@@ -695,19 +1253,49 @@ export default function ClientChat() {
           };
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (last?.inlineNotice && last.noticeText === inline.noticeText) return prev;
+            if (last?.inlineNotice && last.noticeText === inline.noticeText)
+              return prev;
             return [...prev, inline];
           });
 
-          setPresenceByRoom((prev) => upsertMember(prev, activeRoomId, "PM", "PM", pmName, STATUS_AWAY));
+          // PM appears as AWAY (until they type / join)
+          setPresenceByRoom((prev) =>
+            upsertMember(prev, activeRoomId, "PM", "PM", pmName, STATUS_AWAY)
+          );
 
           if (atBottomRef.current) {
             requestAnimationFrame(() => {
-              scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
+              scrollerRef.current?.scrollTo({
+                top: scrollerRef.current.scrollHeight,
+                behavior: "smooth",
+              });
             });
           }
         };
 
+        // optional: delivered/read events if your backend emits them
+        const onDelivered = (payload = {}) => {
+          const { clientNonce, _id } = payload || {};
+          setMessages((prev) =>
+            prev.map((m) =>
+              (clientNonce && m.clientNonce === clientNonce) || (_id && m._id === _id)
+                ? { ...m, status: "delivered", deliveryStatus: "delivered" }
+                : m
+            )
+          );
+        };
+        const onRead = (payload = {}) => {
+          const { clientNonce, _id } = payload || {};
+          setMessages((prev) =>
+            prev.map((m) =>
+              (clientNonce && m.clientNonce === clientNonce) || (_id && m._id === _id)
+                ? { ...m, status: "read", deliveryStatus: "read" }
+                : m
+            )
+          );
+        };
+
+        // de-dup handlers before re-binding
         s.off("message", onMessage);
         s.off("typing", onTyping);
         s.off("system", onSystem);
@@ -715,6 +1303,8 @@ export default function ClientChat() {
         s.off("room:reopened", onRoomReopened);
         s.off("reopen:requested", onReopenRequested);
         s.off("room:pm_assigned", onPmAssigned);
+        s.off("message:delivered", onDelivered);
+        s.off("message:read", onRead);
 
         s.on("message", onMessage);
         s.on("typing", onTyping);
@@ -723,7 +1313,10 @@ export default function ClientChat() {
         s.on("room:reopened", onRoomReopened);
         s.on("reopen:requested", onReopenRequested);
         s.on("room:pm_assigned", onPmAssigned);
+        s.on("message:delivered", onDelivered);
+        s.on("message:read", onRead);
       } catch (e) {
+        // fallback generic
         setErr(e?.response?.data?.message || e?.message || "Failed to load messages");
       }
     })();
@@ -739,18 +1332,23 @@ export default function ClientChat() {
           s.off("room:reopened");
           s.off("reopen:requested");
           s.off("room:pm_assigned");
+          s.off("message:delivered");
+          s.off("message:read");
         }
       } catch {}
       unsub?.();
     };
+    // include reconnectTick to allow retry attempts
   }, [activeRoomId, rooms, reconnectTick]);
 
+  /* ----- ensure "You" is ONLINE when switching rooms ----- */
   useEffect(() => {
     if (!activeRoomId) return;
     setPresenceByRoom((prev) => setStatus(prev, activeRoomId, "Client", STATUS_ONLINE));
     setPresenceOpen(false);
   }, [activeRoomId]);
 
+  /* ----- unread & autoscroll on change ----- */
   useEffect(() => {
     if (!scrollerRef.current) return;
     const count = messages.length;
@@ -759,143 +1357,211 @@ export default function ClientChat() {
     lastCountRef.current = count;
   }, [messages, isAtBottom]);
 
-  /* -------------------------------- actions -------------------------------- */
-  const appendOptimistic = (roomId, text, files, clientNonce) => {
-    const createdAtISO = new Date().toISOString();
+  /* ------------------------------- actions ------------------------------ */
 
-    // build local preview attachments (blob URLs) so user sees files instantly
-    const localAttachments = (files || []).map((f) => {
-      const url = typeof URL !== "undefined" ? URL.createObjectURL(f) : "";
-      return {
-        name: f.name || "attachment",
-        type: f.type || "application/octet-stream",
-        size: f.size || 0,
-        url,
-        isLocal: true,
-      };
-    });
+  // helper to create optimistic attachments (no preview URL yet)
+  function buildOptimisticAttachments(fileArray = []) {
+    return fileArray.map((f) => ({
+      filename: f.name || "file",
+      name: f.name || "file",
+      type: f.type || "",
+      contentType: f.type || "",
+      length: typeof f.size === "number" ? f.size : undefined,
+      // no fileId / url yet — MessageBubble handles this gracefully
+    }));
+  }
 
-    const optimistic = {
+  // Create & append optimistic "me" message immediately
+  function appendOptimistic(text, files, clientNonce) {
+    const nowISO = new Date().toISOString();
+    const optimistic = shapeForClient({
       _id: `tmp-${clientNonce}`,
-      room: String(roomId),
-      content: text,
-      timestamp: new Date(createdAtISO).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      createdAtISO,
+      room: activeRoomId,
+      text,
+      createdAt: nowISO,
+      clientNonce,
       isMine: true,
       senderRole: "Client",
       senderName: "You",
-      attachments: localAttachments,
-      bubbleTheme: "me",
-      clientNonce,
-      deliveryStatus: "sending", // spinner
-    };
-    setMessages((prev) => [...prev, optimistic]);
-    requestAnimationFrame(() => {
-      scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
-      setIsAtBottom(true); setUnreadCount(0);
+      deliveryStatus: "sending",
+      status: "pending",
+      attachments: buildOptimisticAttachments(files),
     });
-  };
+    setMessages((prev) => [...prev, optimistic]);
 
-  const markFailed = (clientNonce, reason) => {
+    // move room to top & set lastMessage
+    setRooms((prev) =>
+      prev.map((r) =>
+        r.id === activeRoomId
+          ? {
+              ...r,
+              lastMessage: previewText(optimistic),
+              updatedAtISO: nowISO,
+            }
+          : r
+      )
+    );
+
+    // autoscroll to bottom
+    requestAnimationFrame(() => {
+      scrollerRef.current?.scrollTo({
+        top: scrollerRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+      setIsAtBottom(true);
+      setUnreadCount(0);
+    });
+  }
+
+  // Update an optimistic message to failed (retryable)
+  function markOptimisticFailed(clientNonce, errMsg) {
     setMessages((prev) =>
       prev.map((m) =>
         m.clientNonce === clientNonce
-          ? { ...m, deliveryStatus: "failed", errorText: reason || "Failed to send" }
+          ? { ...m, status: "failed", deliveryStatus: "failed", error: errMsg }
           : m
       )
     );
-  };
+  }
 
   const onSend = async (text, files = []) => {
     const active = rooms.find((r) => r.id === activeRoomId);
     if (!activeRoomId || !active?.hasRoom || active?.isClosed || header.status === "Closed") return;
 
     const trimmed = (text || "").trim();
-    let fileArray = [];
-    if (files) {
-      if (typeof FileList !== "undefined" && files instanceof FileList) fileArray = Array.from(files);
-      else if (Array.isArray(files)) fileArray = files.filter(Boolean);
-      else fileArray = [files].filter(Boolean);
-    }
-    const hasFiles = fileArray.length > 0;
-    if (!trimmed && !hasFiles) { setErr("Please type a message or attach a file."); return; }
 
-    // rating shortcut
     if (trimmed === "/rate") {
       try {
         const metaRes = await Projects.getRoomMeta(activeRoomId);
         const pr = metaRes?.data?.project || metaRes?.project || {};
         const status = String(pr?.status || "").toLowerCase();
         const already = !!pr?.hasRatings || hasRated;
-        if (status !== "review") { setToast({ text: "You can only rate when the project is in Review.", kind: "warn" }); return; }
-        if (already) { setToast({ text: "You’ve already submitted a rating.", kind: "error" }); return; }
+
+        if (status !== "review") {
+          setToast({ text: "You can only rate when the project is in Review.", kind: "warn" });
+          return;
+        }
+        if (already) {
+          setToast({ text: "You’ve already submitted a rating.", kind: "error" });
+          return;
+        }
         setRatingOpen(true);
-      } catch { setToast({ text: "Unable to open rating right now.", kind: "error" }); }
+      } catch {
+        setToast({ text: "Unable to open rating right now.", kind: "error" });
+      }
       return;
     }
 
-    // create nonce & optimistic bubble immediately
+    let fileArray = [];
+    if (files) {
+      if (typeof FileList !== "undefined" && files instanceof FileList) {
+        fileArray = Array.from(files);
+      } else if (Array.isArray(files)) {
+        fileArray = files.filter(Boolean);
+      } else {
+        fileArray = [files].filter(Boolean);
+      }
+    }
+    const hasFiles = fileArray.length > 0;
+
+    if (!trimmed && !hasFiles) {
+      setErr("Please type a message or attach a file.");
+      return;
+    }
+
+    // NEW: attach a clientNonce so the server echo can reconcile perfectly
     const clientNonce = `cli-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    outboxRef.current.set(clientNonce, { text: trimmed, files: fileArray });
-    appendOptimistic(activeRoomId, trimmed, fileArray, clientNonce);
+
+    // 1) Optimistic append immediately (spinner visible)
+    appendOptimistic(trimmed, fileArray, clientNonce);
 
     try {
-      const res = await sendClientRoomMessage(activeRoomId, { text: trimmed, files: fileArray, clientNonce });
+      // 2) Send to server (upload handled within service)
+      const res = await sendClientRoomMessage(activeRoomId, {
+        text: trimmed,
+        files: fileArray,
+        clientNonce,
+      });
+
+      // 3) If backend returns message immediately, reconcile to "sent"
       if (res?.message) {
-        // When the server echoes, onMessage + safeAppend will promote it to "sent"
-        const shaped = shapeForClient({ ...res.message, clientNonce });
+        const shaped = shapeForClient({
+          ...res.message,
+          clientNonce,
+          deliveryStatus: res.message?.deliveryStatus || "sent",
+          status: res.message?.status || "sent",
+          isMine: true,
+        });
+
+        // Reconcile optimistic bubble
         safeAppend(setMessages, shaped);
+
+        // keep room fresh
         setRooms((prev) =>
           prev.map((r) =>
             r.id === activeRoomId
-              ? { ...r, lastMessage: previewText(shaped), updatedAtISO: new Date().toISOString() }
+              ? {
+                  ...r,
+                  lastMessage: previewText(shaped),
+                  updatedAtISO: new Date().toISOString(),
+                }
               : r
           )
         );
-        outboxRef.current.delete(clientNonce);
-      } else {
-        // No message in response (should still arrive via socket). If it never does, we're safe.
+
+        // autoscroll after server ack
+        requestAnimationFrame(() => {
+          scrollerRef.current?.scrollTo({
+            top: scrollerRef.current.scrollHeight,
+            behavior: "smooth",
+          });
+          setIsAtBottom(true);
+          setUnreadCount(0);
+        });
       }
     } catch (e) {
-      const reason = e?.response?.data?.message || e?.message || "Failed to send";
-      markFailed(clientNonce, reason);
+      // 4) Mark optimistic as failed
+      const msg = e?.response?.data?.message || e?.message || "Failed to send";
+      markOptimisticFailed(clientNonce, msg);
+      setErr(msg);
     }
   };
 
-  const retrySend = async (clientNonce) => {
-    const pack = outboxRef.current.get(clientNonce);
-    if (!pack) {
-      // Try to reconstruct from message in UI
-      const msg = messages.find((m) => m.clientNonce === clientNonce);
-      if (!msg) return;
-      outboxRef.current.set(clientNonce, {
-        text: msg.content || "",
-        files: (msg.attachments || [])
-          .filter((a) => a.isLocal && a.url)
-          .map((a) => {
-            // We cannot recreate original File from blob URL reliably;
-            // recommend users reattach if browser blocks; attempt fetch->blob->File as fallback.
-            return a.__file || null;
-          })
-          .filter(Boolean),
-      });
-    }
-    const { text, files } = outboxRef.current.get(clientNonce) || { text: "", files: [] };
+  // Retry handler (passed down to MessageBubble via onRetry)
+  const handleRetry = async (message) => {
+    const { content, attachments = [], clientNonce: oldNonce } = message || {};
+    const newNonce = `cli-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-    // flip UI back to "sending"
+    // mark old as pending again with new nonce (so reconcilers work)
     setMessages((prev) =>
-      prev.map((m) => (m.clientNonce === clientNonce ? { ...m, deliveryStatus: "sending", errorText: "" } : m))
+      prev.map((m) =>
+        m.clientNonce === oldNonce
+          ? { ...m, status: "pending", deliveryStatus: "sending", clientNonce: newNonce }
+          : m
+      )
     );
 
     try {
-      const res = await sendClientRoomMessage(activeRoomId, { text, files, clientNonce });
+      const res = await sendClientRoomMessage(activeRoomId, {
+        text: content,
+        files: attachments.map((a) => a._originalFile).filter(Boolean), // if you stash originals; else backend already has fileId
+        clientNonce: newNonce,
+      });
+
       if (res?.message) {
-        const shaped = shapeForClient({ ...res.message, clientNonce });
+        const shaped = shapeForClient({
+          ...res.message,
+          clientNonce: newNonce,
+          deliveryStatus: res.message?.deliveryStatus || "sent",
+          status: res.message?.status || "sent",
+          isMine: true,
+        });
         safeAppend(setMessages, shaped);
-        outboxRef.current.delete(clientNonce);
       }
     } catch (e) {
-      markFailed(clientNonce, e?.response?.data?.message || e?.message || "Failed to send");
+      const msg = e?.response?.data?.message || e?.message || "Failed to send";
+      markOptimisticFailed(newNonce, msg);
+      setErr(msg);
     }
   };
 
@@ -903,7 +1569,13 @@ export default function ClientChat() {
     const s = getSocket();
     const active = rooms.find((r) => r.id === activeRoomId);
     if (!s || !activeRoomId || header.status === "Closed" || active?.isClosed) return;
-    s.emit("typing", { roomId: activeRoomId, userId: "client", role: "Client", isTyping: !!isTyping, name: "Client" });
+    s.emit("typing", {
+      roomId: activeRoomId,
+      userId: "client",
+      role: "Client",
+      isTyping: !!isTyping,
+      name: "Client",
+    });
   };
 
   const handleRequestReopen = async () => {
@@ -916,16 +1588,28 @@ export default function ClientChat() {
       setToast({ text: "Reopen request sent to your PM.", kind: "ok" });
       setNotifications((n) => [
         ...n,
-        { id: `notif-${Date.now()}`, type: "success", message: "Reopen request sent",
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) },
+        {
+          id: `notif-${Date.now()}`,
+          type: "success",
+          message: "Reopen request sent",
+          timestamp: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        },
       ]);
     } catch (e) {
-      setToast({ text: e?.response?.data?.message || e?.message || "Failed to request reopen", kind: "error" });
+      setToast({
+        text:
+          e?.response?.data?.message || e?.message || "Failed to request reopen",
+        kind: "error",
+      });
     }
   };
 
   const handleSearchResultSelect = (index) => {
-    const m = messages[index];
+    const flat = messages;
+    const m = flat[index];
     if (!m) return;
     setHighlightedMessageId(m._id);
     const node = messageRefs.current[m._id];
@@ -935,32 +1619,48 @@ export default function ClientChat() {
     }
   };
 
+  /* ----------------------- context menu handlers ----------------------- */
   const handleContextMenu = (e) => {
     e.preventDefault();
     const sel = window.getSelection?.();
     const selectedText = sel && String(sel.toString()).trim();
     lastRightClickText.current =
-      selectedText || (e.target?.innerText ? String(e.target.innerText).trim().slice(0, 2000) : "");
+      selectedText ||
+      (e.target?.innerText ? String(e.target.innerText).trim().slice(0, 2000) : "");
     setMenuPos({ x: e.clientX, y: e.clientY });
     setMenuOpen(true);
   };
 
   const contextMenuItems = [
-    { id: "copy-text", label: "Copy selected text", onClick: () => {
-      const sel = window.getSelection?.(); const s = sel && String(sel.toString()); if (s) navigator.clipboard?.writeText(s);
-    } },
-    { id: "copy-msg", label: "Copy message", onClick: () => {
-      const t = lastRightClickText.current || ""; if (t) navigator.clipboard?.writeText(t);
-    } },
+    {
+      id: "copy-text",
+      label: "Copy selected text",
+      onClick: () => {
+        const sel = window.getSelection?.();
+        const s = sel && String(sel.toString());
+        if (s) navigator.clipboard?.writeText(s);
+      },
+    },
+    {
+      id: "copy-msg",
+      label: "Copy message",
+      onClick: () => {
+        const t = lastRightClickText.current || "";
+        if (t) navigator.clipboard?.writeText(t);
+      },
+    },
     { id: "reply", label: "Reply", onClick: () => {} },
     { id: "delete", label: "Delete (if allowed)", onClick: () => {} },
   ];
 
   /* --------------------------------- render --------------------------------- */
+
   if (loading) return <div className="h-screen grid place-items-center">Loading chat…</div>;
 
   const genericErrBanner = err ? (
-    <div className="px-4 py-2 text-sm text-red-700 bg-red-50 border-b border-red-200">{err}</div>
+    <div className="px-4 py-2 text-sm text-red-700 bg-red-50 border-b border-red-200">
+      {err}
+    </div>
   ) : null;
 
   if (!rooms.length) {
@@ -974,6 +1674,7 @@ export default function ClientChat() {
   const active = rooms.find((r) => r.id === activeRoomId);
   const requestIdForRating = active?.requestId;
 
+  // Presence model -> participants for header
   const members = (presenceByRoom[activeRoomId]?.members || []);
   const totalUsers = members.length;
 
@@ -981,10 +1682,11 @@ export default function ClientChat() {
     id: m.id || m.role,
     name: m.name,
     role: m.role,
-    isOnline: m.status !== STATUS_OFFLINE,
-    inRoom: m.status === STATUS_ONLINE,
+    isOnline: m.status !== STATUS_OFFLINE,   // online or away
+    inRoom: m.status === STATUS_ONLINE,      // active in this room
   }));
 
+  // Header data (status line uses typingText when online)
   const headerData = {
     ...header,
     status: header.status === "Online" ? typingText || "Online" : header.status,
@@ -999,9 +1701,13 @@ export default function ClientChat() {
 
   const scrollToBottom = () => {
     if (scrollerRef.current) {
-      scrollerRef.current.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
+      scrollerRef.current.scrollTo({
+        top: scrollerRef.current.scrollHeight,
+        behavior: "smooth",
+      });
     }
-    setIsAtBottom(true); setUnreadCount(0);
+    setIsAtBottom(true);
+    setUnreadCount(0);
   };
 
   const refreshPage = () => window.location.reload();
@@ -1009,6 +1715,7 @@ export default function ClientChat() {
 
   return (
     <div className="h-screen flex flex-col bg-white text-black relative">
+      {/* Fatal overlays */}
       {fatal && (
         <ConnectionErrorOverlay
           type={fatal.type}
@@ -1018,9 +1725,14 @@ export default function ClientChat() {
         />
       )}
 
+      {/* Fixed minimal top bar (brand/back) */}
       <div className="flex-none h-12 md:h-14 w-full border-b z-40 bg-white border-gray-200">
         <div className="h-full max-w-[1920px] mx-auto px-3 md:px-4 flex items-center justify-between">
-          <a href="/" className="inline-flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm font-medium transition hover:bg-gray-100" title="Back">
+          <a
+            href="/"
+            className="inline-flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm font-medium transition hover:bg-gray-100"
+            title="Back"
+          >
             <svg className="w-5 h-5 md:w-6 md:h-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M10 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               <path d="M4 12h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
@@ -1028,7 +1740,10 @@ export default function ClientChat() {
             <span className="hidden sm:inline">Back</span>
           </a>
           <div className="text-sm font-medium text-gray-600">Client Chat</div>
-          <button onClick={() => setShowSidebar(true)} className="sm:hidden px-3 py-1.5 text-sm font-medium rounded-lg transition hover:bg-gray-100">
+          <button
+            onClick={() => setShowSidebar(true)}
+            className="sm:hidden px-3 py-1.5 text-sm font-medium rounded-lg transition hover:bg-gray-100"
+          >
             Rooms
           </button>
         </div>
@@ -1036,16 +1751,26 @@ export default function ClientChat() {
 
       {genericErrBanner}
 
+      {/* Main Layout */}
       <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Mobile sidebar */}
+        {/* Mobile Sidebar Overlay */}
         {showSidebar && (
           <div className="fixed inset-0 z-50 sm:hidden">
-            <div className="absolute inset-0 bg-black/40 animate-fade-in" onClick={() => setShowSidebar(false)} />
+            <div
+              className="absolute inset-0 bg-black/40 animate-fade-in"
+              onClick={() => setShowSidebar(false)}
+            />
             <aside className="absolute inset-y-0 left-0 w-[85%] max-w-sm shadow-2xl flex flex-col animate-slide-left bg-white">
               <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white">
                 <h2 className="font-semibold">Conversations</h2>
-                <button onClick={() => setShowSidebar(false)} className="p-2 rounded-lg text-xl leading-none hover:bg-gray-100">×</button>
+                <button
+                  onClick={() => setShowSidebar(false)}
+                  className="p-2 rounded-lg text-xl leading-none hover:bg-gray-100"
+                >
+                  ×
+                </button>
               </div>
+
               <div className="flex-1 min-h-0 overflow-y-auto">
                 <ConversationList
                   conversations={rooms.map((r) => ({
@@ -1053,14 +1778,20 @@ export default function ClientChat() {
                     name: shortName(r.title),
                     avatar: "",
                     lastMessage: r.lastMessage || "",
-                    time: new Date(r.updatedAtISO || r.updatedAt || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                    time: new Date(r.updatedAtISO || r.updatedAt || Date.now()).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }),
                     unreadCount: 0,
                     isOnline: !r.isClosed,
                     isPinned: false,
                     typing: !!typingByRoom[r.id] && Object.keys(typingByRoom[r.id]).length > 0,
                   }))}
                   activeConversationId={activeRoomId}
-                  onConversationSelect={(id) => { setActiveRoomId(id); setShowSidebar(false); }}
+                  onConversationSelect={(id) => {
+                    setActiveRoomId(id);
+                    setShowSidebar(false);
+                  }}
                   loading={false}
                   error={""}
                 />
@@ -1069,9 +1800,11 @@ export default function ClientChat() {
           </div>
         )}
 
-        {/* Desktop sidebar */}
+        {/* Desktop Sidebar */}
         <aside className="hidden sm:flex w-80 lg:w-96 flex-col border-r border-gray-200 bg-white">
-          <div className="px-4 py-3 border-b border-gray-200"><h2 className="font-semibold">Conversations</h2></div>
+          <div className="px-4 py-3 border-b border-gray-200">
+            <h2 className="font-semibold">Conversations</h2>
+          </div>
           <div className="flex-1 min-h-0 overflow-y-auto">
             <ConversationList
               conversations={rooms.map((r) => ({
@@ -1079,7 +1812,10 @@ export default function ClientChat() {
                 name: shortName(r.title),
                 avatar: "",
                 lastMessage: r.lastMessage || "",
-                time: new Date(r.updatedAtISO || r.updatedAt || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                time: new Date(r.updatedAtISO || r.updatedAt || Date.now()).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                }),
                 unreadCount: 0,
                 isOnline: !r.isClosed,
                 isPinned: false,
@@ -1093,10 +1829,14 @@ export default function ClientChat() {
           </div>
         </aside>
 
-        {/* Chat area */}
+        {/* Chat Area */}
         <section className="relative flex-1 flex flex-col overflow-hidden bg-gray-50">
-          <div className="absolute inset-0 z-0 pointer-events-none"><ChatBackground variant="client" /></div>
+          {/* Non-scrolling background */}
+          <div className="absolute inset-0 z-0 pointer-events-none">
+            <ChatBackground variant="client" />
+          </div>
 
+          {/* Chat Header */}
           <div className="relative z-10">
             <div className="relative">
               <ChatHeader
@@ -1109,11 +1849,17 @@ export default function ClientChat() {
                 onPresenceToggle={() => setPresenceOpen((v) => !v)}
                 participants={participantsForHeader}
               />
+
               {presenceOpen && (
                 <div className="absolute right-4 top-[calc(100%+8px)] z-40 w-80 rounded-xl border border-gray-200 bg-white shadow-xl">
                   <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
                     <div className="text-sm font-semibold">Room participants</div>
-                    <button onClick={() => setPresenceOpen(false)} className="px-2 py-1 rounded-lg hover:bg-gray-100">×</button>
+                    <button
+                      onClick={() => setPresenceOpen(false)}
+                      className="px-2 py-1 rounded-lg hover:bg-gray-100"
+                    >
+                      ×
+                    </button>
                   </div>
                   <div className="p-3 space-y-4 text-sm">
                     <div>
@@ -1128,7 +1874,9 @@ export default function ClientChat() {
                             </li>
                           ))}
                         </ul>
-                      ) : <div className="mt-1 text-xs text-gray-500">No one active</div>}
+                      ) : (
+                        <div className="mt-1 text-xs text-gray-500">No one active</div>
+                      )}
                     </div>
 
                     <div>
@@ -1143,7 +1891,9 @@ export default function ClientChat() {
                             </li>
                           ))}
                         </ul>
-                      ) : <div className="mt-1 text-xs text-gray-500">No one away</div>}
+                      ) : (
+                        <div className="mt-1 text-xs text-gray-500">No one away</div>
+                      )}
                     </div>
 
                     <div>
@@ -1158,7 +1908,9 @@ export default function ClientChat() {
                             </li>
                           ))}
                         </ul>
-                      ) : <div className="mt-1 text-xs text-gray-500">No one offline</div>}
+                      ) : (
+                        <div className="mt-1 text-xs text-gray-500">No one offline</div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1166,29 +1918,41 @@ export default function ClientChat() {
             </div>
           </div>
 
+          {/* Search Bar */}
           {showSearch && (
             <div className="px-4 pt-2 z-10 animate-slide-down">
-              <SearchBar messages={messages} onClose={() => setShowSearch(false)} onResultSelect={handleSearchResultSelect} />
+              <SearchBar
+                messages={messages}
+                onClose={() => setShowSearch(false)}
+                onResultSelect={handleSearchResultSelect}
+              />
             </div>
           )}
 
+          {/* Inline Notifications */}
           {notifications.length > 0 && (
             <div className="px-4 pt-3 space-y-2 z-10">
               {notifications.map((notif) => (
                 <InlineNotification
                   key={notif.id}
                   notification={notif}
-                  onDismiss={(id) => setNotifications((prev) => prev.filter((n) => n.id !== id))}
+                  onDismiss={(id) =>
+                    setNotifications((prev) => prev.filter((n) => n.id !== id))
+                  }
                 />
               ))}
             </div>
           )}
 
+          {/* Room Status Banner */}
           {active?.isClosed && (
             <div className="z-10 border-b px-4 py-3 flex items-center justify-between gap-2 bg-gray-100 border-gray-200">
               <div className="text-sm text-gray-700">This room is closed.</div>
               {!reopenRequested ? (
-                <button onClick={handleRequestReopen} className="px-4 py-2 text-sm font-medium rounded-lg transition text-white bg-black hover:bg-gray-800">
+                <button
+                  onClick={handleRequestReopen}
+                  className="px-4 py-2 text-sm font-medium rounded-lg transition text-white bg-black hover:bg-gray-800"
+                >
                   Request to Reopen
                 </button>
               ) : (
@@ -1199,6 +1963,7 @@ export default function ClientChat() {
             </div>
           )}
 
+          {/* Messages Area */}
           <div
             ref={scrollerRef}
             className="flex-1 overflow-y-auto px-4 py-4 relative z-10"
@@ -1207,11 +1972,14 @@ export default function ClientChat() {
             {activeRoomId && active?.hasRoom ? (
               groupMessagesByDate(messages).map((group, idx) => (
                 <div key={idx} className="mb-6">
+                  {/* Date Separator */}
                   <div className="flex items-center justify-center mb-4">
                     <div className="border shadow-sm rounded-full px-4 py-1.5 text-xs font-medium bg-white border-gray-200 text-gray-600">
                       {group.date}
                     </div>
                   </div>
+
+                  {/* Messages */}
                   <div className="space-y-1">
                     {group.messages.map((m) =>
                       m.inlineNotice ? (
@@ -1221,7 +1989,7 @@ export default function ClientChat() {
                           <MessageBubble
                             message={m}
                             highlighted={highlightedMessageId === m._id}
-                            onRetry={m.deliveryStatus === "failed" ? () => retrySend(m.clientNonce) : undefined}
+                            onRetry={() => handleRetry(m)}
                           />
                         </div>
                       )
@@ -1236,6 +2004,7 @@ export default function ClientChat() {
             )}
           </div>
 
+          {/* Typing Indicator */}
           {typingText && header.status !== "Closed" && (
             <div className="px-4 pb-2 z-10">
               <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs bg-white border-gray-200 text-gray-600">
@@ -1249,26 +2018,39 @@ export default function ClientChat() {
             </div>
           )}
 
+          {/* Composer */}
           <div className="border-t px-3 md:px-4 py-2 bg-white border-gray-200 z-10">
-            <ChatInput onSendMessage={onSend} onTypingChange={onTypingChange} typingText="" disabled={Boolean(active?.isClosed)} />
+            <ChatInput
+              onSendMessage={onSend}
+              onTypingChange={onTypingChange}
+              typingText=""
+              disabled={Boolean(active?.isClosed)}
+            />
             <div className="mt-1 h-6" />
           </div>
 
+          {/* Unread Messages CTA */}
           {unreadCount > 0 && !isAtBottom && (
             <UnreadMessagesIndicator count={unreadCount} onClick={scrollToBottom} />
           )}
         </section>
       </div>
 
+      {/* Rating modal (new) */}
       {ratingOpen && requestIdForRating && (
         <RatingModal
           requestId={requestIdForRating}
-          roomId={activeRoomId}
+          roomId={activeRoomId} // lets the modal validate status=Review & not already rated
           onClose={() => setRatingOpen(false)}
-          onRated={() => { setHasRated(true); setRatingOpen(false); setToast({ text: "Thanks for the feedback!", kind: "ok" }); }}
+          onRated={() => {
+            setHasRated(true);
+            setRatingOpen(false);
+            setToast({ text: "Thanks for the feedback!", kind: "ok" });
+          }}
         />
       )}
 
+      {/* Tiny toast */}
       {toast && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[70]">
           <div className="rounded-xl border border-black/10 bg-white px-4 py-2 shadow">
@@ -1277,6 +2059,7 @@ export default function ClientChat() {
         </div>
       )}
 
+      {/* Viewport-bounded context menu (portal) */}
       <ContextMenu
         open={menuOpen}
         x={menuPos.x}
@@ -1288,12 +2071,20 @@ export default function ClientChat() {
   );
 }
 
+/* --------------------------- socket ready helper --------------------------- */
 async function waitForSocketConnected(s, timeout = 4000) {
   return new Promise((resolve, reject) => {
     if (!s) return reject(new Error("No socket"));
     if (s.connected) return resolve(true);
-    const to = setTimeout(() => { s.off("connect", on); reject(new Error("Socket connect timeout")); }, timeout);
-    const on = () => { clearTimeout(to); s.off("connect", on); resolve(true); };
+    const to = setTimeout(() => {
+      s.off("connect", on);
+      reject(new Error("Socket connect timeout"));
+    }, timeout);
+    const on = () => {
+      clearTimeout(to);
+      s.off("connect", on);
+      resolve(true);
+    };
     s.on("connect", on);
   });
 }

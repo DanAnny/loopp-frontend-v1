@@ -174,7 +174,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
       lastName: r?.lastName || "",
       email: r?.email || "",
       completionDeadlineLabel: label,
-      pmDeadline: guessedISO || "", // prefill if client gave ISO
+      pmDeadline: guessedISO || "",
       title: r?.projectTitle || r?.title || "",
       description: r?.projectDescription || `Task for "${r?.projectTitle || r?.title || "Project"}"`,
     }));
@@ -264,7 +264,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
           />
 
           {/* Dialog */}
-          <div className="fixed inset-0 z-[90] grid place-items-center p-3 sm:p-4">
+          <div className="fixed inset-0 z-[90] grid place-items-center p-3 sm:p-4 overscroll-contain">
             <motion.div
               ref={dialogRef}
               role="dialog"
@@ -273,7 +273,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
-              className="w-full max-w-2xl bg-[#0f1729] rounded-2xl shadow-2xl border border-slate-700/50 max-h-[90vh] flex flex-col overflow-hidden overflow-x-hidden" // 👈 prevent horiz overflow
+              className="w-[min(42rem,calc(100vw-24px))] max-w-none bg-[#0f1729] rounded-2xl shadow-2xl border border-slate-700/50 max-h-[90vh] flex flex-col overflow-hidden"
               onClick={(e)=>e.stopPropagation()}
             >
               {/* Top accent bar */}
@@ -303,7 +303,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
               </div>
 
               {/* Body (scrollable) */}
-              <div className="flex-1 overflow-y-auto overflow-x-hidden p-5 space-y-5 bg-[#0f1729]"> {/* 👈 hide horiz */}
+              <div className="flex-1 overflow-y-auto overflow-x-hidden p-5 space-y-5 bg-[#0f1729]">
                 <AnimatePresence mode="wait">
                   {error && (
                     <motion.div
@@ -336,7 +336,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
                   initial={{ opacity: 0, y: 5 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.05, duration: 0.2 }}
-                  className="bg-[#1a2332] border border-slate-700/50 rounded-xl p-4"
+                  className="bg-[#1a2332] border border-slate-700/50 rounded-xl p-4 overflow-x-hidden"
                 >
                   <label className="block text-xs uppercase tracking-[0.15em] text-slate-400 mb-3">Project Request</label>
 
@@ -363,14 +363,16 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
                       </motion.button>
                     </div>
                   ) : (
-                    <div className="flex gap-2 min-w-0"> {/* 👈 allow shrink */}
-                      <div className="relative flex-1 min-w-0"> {/* 👈 constrain select */}
+                    <div className="flex gap-2 items-stretch min-w-0">
+                      {/* Constrained select wrapper */}
+                      <div className="relative flex-1 min-w-0">
                         <select
                           ref={firstFieldRef}
                           value={form.uiRequestKey}
                           onChange={(e) => onPickRequest(e.target.value)}
                           disabled={loadingLists || loading || requests.length === 0}
-                          className="block w-full min-w-0 px-4 py-3 pr-10 rounded-xl bg-[#0f1729] border border-slate-700/50 focus:outline-none focus:border-slate-600 transition-all text-white disabled:opacity-50 appearance-none overflow-hidden"
+                          className="block w-full min-w-0 max-w-full px-4 py-3 pr-10 rounded-xl bg-[#0f1729] border border-slate-700/50 focus:outline-none focus:border-slate-600 transition-all text-white disabled:opacity-50 appearance-none overflow-hidden truncate"
+                          style={{ whiteSpace: "nowrap", textOverflow: "ellipsis" }}
                         >
                           <option key="placeholder-option" value="">
                             {loadingLists ? "Loading…" : "Select a request…"}
@@ -386,13 +388,14 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
                           ▼
                         </div>
                       </div>
+
                       <motion.button
                         whileHover={{ rotate: 180, scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
                         type="button"
                         onClick={loadLists}
                         disabled={loadingLists || loading}
-                        className="px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-slate-700/50 disabled:opacity-50 transition-all shrink-0" // 👈 don't grow
+                        className="px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-slate-700/50 disabled:opacity-50 transition-all shrink-0"
                         title="Reload"
                       >
                         {loadingLists ? <Loader2 className="w-5 h-5 animate-spin text-white" /> : <Plus className="w-5 h-5 rotate-45 text-white" />}
@@ -420,7 +423,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
                   initial={{ opacity: 0, y: 5 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.1, duration: 0.2 }}
-                  className="bg-[#1a2332] border border-slate-700/50 rounded-xl p-4"
+                  className="bg-[#1a2332] border border-slate-700/50 rounded-xl p-4 overflow-x-hidden"
                 >
                   <label className="block text-xs uppercase tracking-[0.15em] text-slate-400 mb-3">Engineer Assignment</label>
                   <div className="flex items-center gap-3 min-w-0">
@@ -454,7 +457,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
                   initial={{ opacity: 0, y: 5 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.15, duration: 0.2 }}
-                  className="bg-[#1a2332] border border-slate-700/50 rounded-xl p-4 space-y-4"
+                  className="bg-[#1a2332] border border-slate-700/50 rounded-xl p-4 space-y-4 overflow-x-hidden"
                 >
                   <label className="block text-xs uppercase tracking-[0.15em] text-slate-400 mb-3">Task Details</label>
 
@@ -485,7 +488,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
                       ref={deadlineRef}
                       type="date"
                       value={form.pmDeadline}
-                      min={minDate}                 // ⛔ past dates
+                      min={minDate}
                       onChange={(e) => {
                         const v = e.target.value;
                         if (v && v < minDate) {
@@ -575,7 +578,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
                   exit={{ opacity: 0, scale: 0.95, y: 10 }}
                   transition={{ duration: 0.2, ease: "easeOut" }}
                 >
-                  <div className="w-full max-w-lg bg-[#1a2332] rounded-2xl border border-slate-700/50 shadow-2xl p-6" onClick={(e)=>e.stopPropagation()}>
+                  <div className="w-[min(36rem,calc(100vw-24px))] bg-[#1a2332] rounded-2xl border border-slate-700/50 shadow-2xl p-6 overflow-x-hidden" onClick={(e)=>e.stopPropagation()}>
                     <div className="flex items-start gap-4">
                       <div className="p-3 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/30 shrink-0">
                         <AlertTriangle className="w-6 h-6" />
@@ -650,12 +653,11 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
 /* ------------------------------- UI Helpers ------------------------------- */
 
 function Field({ label, icon: Icon, children, onIconClick }) {
-  // Detect textarea to adjust icon alignment
   const isTextarea = children?.type === 'textarea';
   return (
-    <div>
+    <div className="min-w-0">
       <label className="block text-xs uppercase tracking-[0.15em] text-slate-400 mb-2">{label}</label>
-      <div className="relative min-w-0">
+      <div className="relative min-w-0 overflow-x-hidden">
         {Icon && (
           <button
             type="button"
@@ -666,7 +668,6 @@ function Field({ label, icon: Icon, children, onIconClick }) {
             <Icon className="w-4 h-4 text-slate-500" />
           </button>
         )}
-        {/* pad for icon */}
         <div className={`${Icon ? "pl-8" : ""} min-w-0`}>{children}</div>
       </div>
     </div>
@@ -706,7 +707,7 @@ function EngineerPicker({ open, onClose, engineers, onPick }) {
         exit={{ opacity: 0, scale: 0.95, y: 10 }}
         transition={{ duration: 0.2, ease: "easeOut" }}
       >
-        <div className="w-full max-w-2xl bg-[#0f1729] rounded-2xl border border-slate-700/50 shadow-2xl overflow-hidden" onClick={(e)=>e.stopPropagation()}>
+        <div className="w-[min(42rem,calc(100vw-24px))] bg-[#0f1729] rounded-2xl border border-slate-700/50 shadow-2xl overflow-hidden" onClick={(e)=>e.stopPropagation()}>
           <div className="px-5 py-4 border-b border-slate-700/50 bg-[#1a2332] flex items-center justify-between">
             <div className="min-w-0">
               <h3 className="text-white">Select Engineer</h3>

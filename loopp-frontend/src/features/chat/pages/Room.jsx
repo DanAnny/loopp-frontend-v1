@@ -17,9 +17,7 @@ import InlineNotification from "@/features/chat/components/InlineNotification";
 import ChatBackground from "@/features/chat/components/ChatBackground";
 import UnreadMessagesIndicator from "@/features/chat/components/UnreadMessagesIndicator";
 import InvoiceModal from "../components/InvoiceModal";
-// import ZoomModal from "../components/ZoomModal"; // ⛔️ disabled per request
-
-// within ~Room.jsx
+// import ZoomModal from "../components/ZoomModal"; // ⛔️ disabled
 
 // consider two times "close" if within N ms
 const closeInTime = (aISO, bISO, ms = 10000) => {
@@ -32,15 +30,13 @@ const closeInTime = (aISO, bISO, ms = 10000) => {
 function reconcileMineWithoutNonce(prev, shaped) {
   if (!shaped.isMine) return prev;
 
-  // Find the most recent optimistic "pending/sent" mine with same content
-  // and a close timestamp window — replace it instead of appending.
   const idx = [...prev]
     .reverse()
     .findIndex((m) =>
       m.isMine &&
       (m.status === "pending" || m.status === "sent") &&
       (m.content || "").trim() === (shaped.content || "").trim() &&
-      closeInTime(m.createdAtISO, shaped.createdAtISO, 15000) // 15s window
+      closeInTime(m.createdAtISO, shaped.createdAtISO, 15000)
     );
 
   if (idx === -1) return prev;
@@ -54,6 +50,8 @@ function reconcileMineWithoutNonce(prev, shaped) {
     deliveredAt: shaped.deliveredAt || new Date().toISOString(),
     createdAtISO: shaped.createdAtISO || prev[realIdx].createdAtISO,
     timestamp: shaped.timestamp || prev[realIdx].timestamp,
+    attachments: shaped.attachments || prev[realIdx].attachments || [],
+    visibleTo: shaped.visibleTo || prev[realIdx].visibleTo || "All",
   };
   return next;
 }
@@ -145,6 +143,38 @@ function canViewerSee(m, viewerRole) {
 const genClientNonce = () =>
   Math.random().toString(36).slice(2) + "-" + Date.now().toString(36);
 
+// track temp object URLs to revoke on reconcile/unmount
+const localUrlRegistry = {
+  addUrl(ref, url) {
+    if (!ref.current) ref.current = new Set();
+    ref.current.add(url);
+  },
+  revokeAll(ref) {
+    if (ref.current) {
+      for (const u of ref.current) {
+        try { URL.revokeObjectURL(u); } catch {}
+      }
+      ref.current.clear();
+    }
+  }
+};
+
+function buildOptimisticAttachments(files, regRef) {
+  if (!Array.isArray(files) || files.length === 0) return [];
+  return files.map((f, i) => {
+    const url = URL.createObjectURL(f);
+    localUrlRegistry.addUrl(regRef, url);
+    return {
+      _id: `local-${Date.now()}-${i}`,
+      name: f.name,
+      size: f.size,
+      type: f.type,
+      url,            // local preview
+      isLocal: true,  // mark as local
+    };
+  });
+}
+
 function normalizeIncoming(m, meId, dir = {}) {
   const rawSender = m.sender || m.user || {};
   const senderId = (
@@ -211,13 +241,11 @@ function normalizeIncoming(m, meId, dir = {}) {
 
     attachments,
 
-    // delivery state – server should include if available
     status: m.status || (isMine ? "delivered" : "delivered"),
     clientNonce: m.clientNonce || null,
     deliveredAt: m.deliveredAt || null,
     readAt: m.readAt || null,
 
-    // NEW: visibility
     visibleTo: normalizeVisibleTo(m.visibleTo),
   };
 
@@ -225,17 +253,6 @@ function normalizeIncoming(m, meId, dir = {}) {
   return shaped;
 }
 
-function msgSignature(m) {
-  return [
-    String(m.room || ""),
-    String(m.senderRole || ""),
-    String(m.isMine ? "1" : "0"),
-    (m.content || "").slice(0, 200),
-    (m.createdAtISO || "").slice(0, 19),
-    String(Array.isArray(m.attachments) ? m.attachments.length : 0),
-    String(m.clientNonce || "")
-  ].join("|");
-}
 function safeAppend(setMessages, incoming) {
   setMessages((prev) => {
     // primary: id match
@@ -253,12 +270,14 @@ function safeAppend(setMessages, incoming) {
           deliveredAt: incoming.deliveredAt || new Date().toISOString(),
           createdAtISO: incoming.createdAtISO || next[nIdx].createdAtISO,
           timestamp: incoming.timestamp || next[nIdx].timestamp,
+          attachments: incoming.attachments || next[nIdx].attachments || [],
+          visibleTo: incoming.visibleTo || next[nIdx].visibleTo || "All",
         };
         return next;
       }
     }
 
-    // tertiary: fuzzy de-dupe for "my" messages (same text, recent time window)
+    // tertiary: fuzzy mine de-dupe
     const dupIdx = prev.findIndex(
       (x) =>
         x.isMine === true &&
@@ -276,6 +295,8 @@ function safeAppend(setMessages, incoming) {
         deliveredAt: incoming.deliveredAt || new Date().toISOString(),
         createdAtISO: incoming.createdAtISO || next[dupIdx].createdAtISO,
         timestamp: incoming.timestamp || next[dupIdx].timestamp,
+        attachments: incoming.attachments || next[dupIdx].attachments || [],
+        visibleTo: incoming.visibleTo || next[dupIdx].visibleTo || "All",
       };
       return next;
     }
@@ -283,6 +304,7 @@ function safeAppend(setMessages, incoming) {
     return [...prev, incoming];
   });
 }
+
 async function waitForSocketConnected(s, timeout = 20000) {
   return new Promise((resolve, reject) => {
     if (!s) return reject(new Error("No socket"));
@@ -341,7 +363,7 @@ const toConversation = (typingByRoom) => (r) => {
   };
 };
 
-/* ======================= NEW: Friendly Fatal Error Screen ======================= */
+/* ======================= Friendly Fatal Error Screen ======================= */
 function ErrorScreen({ kind, title, message, onRefresh, onRetry, retryLabel = "Try Again" }) {
   return (
     <div className="h-screen w-full flex flex-col items-center justify-center bg-gradient-to-b from-gray-50 to-white px-6 text-center">
@@ -427,7 +449,6 @@ export default function Room() {
 
   const [err, setErr] = useState("");
 
-  // fatal error state for connection/join issues
   const [fatal, setFatal] = useState(null);
 
   const [messages, setMessages] = useState([]);
@@ -452,8 +473,18 @@ export default function Room() {
   const atBottomRef = useRef(true);
   const messageRefs = useRef({});
 
+  // local preview URLs registry
+  const localUrlsRef = useRef(new Set());
+
   // trigger rejoin attempts
   const [rejoinTick, setRejoinTick] = useState(0);
+
+  useEffect(() => {
+    return () => {
+      // revoke any remaining object URLs on unmount
+      localUrlRegistry.revokeAll(localUrlsRef);
+    };
+  }, []);
 
   /* ----------------------------- typing cleanup ---------------------------- */
   useEffect(() => {
@@ -533,7 +564,7 @@ export default function Room() {
         setErr("");
         setFatal(null);
 
-        const s = connectSocket(userId);
+        connectSocket(userId);
 
         try {
           await waitForSocketConnected(getSocket());
@@ -612,7 +643,6 @@ export default function Room() {
         const fromProject = statusLc === "complete";
         setRoomClosed(fromProject || metaRoomClosed);
 
-        // update sidebar preview timing
         if (normalized.length) {
           const last = normalized[normalized.length - 1];
           setRooms((prev) =>
@@ -624,11 +654,9 @@ export default function Room() {
           );
         }
 
-        // reset unread for current room
         clearUnread(userId, activeRoomId);
         setRooms((prev) => prev.map((r) => (r.id === activeRoomId ? { ...r, unreadCount: 0 } : r)));
 
-        // scroll to bottom once on load
         requestAnimationFrame(() => {
           const el = scrollerRef.current;
           if (el) {
@@ -647,7 +675,6 @@ export default function Room() {
           const rid = String(shaped.room || activeRoomId);
 
           if (shaped.isMine) {
-            // Reconcile-by-nonce first
             if (shaped.clientNonce) {
               setMessages((prev) => {
                 const idx = prev.findIndex(
@@ -655,6 +682,17 @@ export default function Room() {
                 );
                 if (idx !== -1) {
                   const prevMsg = prev[idx];
+
+                  // revoke any local preview URLs
+                  if (prevMsg.attachments?.length) {
+                    for (const a of prevMsg.attachments) {
+                      if (a?.isLocal && a?.url) {
+                        try { URL.revokeObjectURL(a.url); } catch {}
+                        localUrlsRef.current.delete(a.url);
+                      }
+                    }
+                  }
+
                   const merged = {
                     ...prevMsg,
                     _id: shaped._id,
@@ -662,22 +700,23 @@ export default function Room() {
                     deliveredAt: shaped.deliveredAt || new Date().toISOString(),
                     createdAtISO: shaped.createdAtISO || prevMsg.createdAtISO,
                     timestamp: shaped.timestamp || prevMsg.timestamp,
-                    visibleTo: shaped.visibleTo || prevMsg.visibleTo,
+                    attachments: shaped.attachments || prevMsg.attachments || [],
+                    visibleTo: shaped.visibleTo || prevMsg.visibleTo || "All",
                   };
                   const next = prev.slice();
                   next[idx] = merged;
                   return next;
                 }
-                // fallback: fuzzy reconcile without nonce; and if no change, APPEND
+                // fallback: fuzzy reconcile; or append so sender sees it
                 const next = reconcileMineWithoutNonce(prev, shaped);
                 if (next === prev) {
                   if (prev.some((x) => x._id === shaped._id)) return prev;
-                  return [...prev, shaped]; // <— ensures PM sees their own non-optimistic message (like invoice)
+                  return [...prev, shaped];
                 }
                 return next;
               });
             } else {
-              // no nonce at all — fuzzy reconcile; and if not replaced, append
+              // no nonce at all — fuzzy reconcile; if not replaced, append
               setMessages((prev) => {
                 const next = reconcileMineWithoutNonce(prev, shaped);
                 if (next === prev) {
@@ -688,7 +727,7 @@ export default function Room() {
               });
             }
           } else {
-            // messages from others (or mine already reconciled): keep sidebar/ordering fresh
+            // messages from others: keep sidebar fresh
             setRooms((prev) => {
               let updated = prev;
               const idx = updated.findIndex((x) => x.id === rid);
@@ -717,7 +756,7 @@ export default function Room() {
             safeAppend(setMessages, shaped);
           }
 
-          // scroll behavior unchanged...
+          // scroll behavior
           const el = scrollerRef.current;
           if (!el) return;
           const atBottom = atBottomRef.current;
@@ -922,7 +961,7 @@ export default function Room() {
   const handleSendMessage = async (text, files = []) => {
     if (!activeRoomId || roomClosed) return;
 
-    // normalize file input
+    // normalize files
     let fileArray = [];
     if (files) {
       if (typeof FileList !== "undefined" && files instanceof FileList) {
@@ -942,12 +981,15 @@ export default function Room() {
     const tempId = `tmp-${clientNonce}`;
     const createdAtISO = new Date().toISOString();
 
-    // Build optimistic message
+    // optimistic attachments with local previews
+    const optimisticAttachments = buildOptimisticAttachments(fileArray, localUrlsRef);
+
+    // optimistic message for sender
     const optimistic = {
       _id: tempId,
       room: activeRoomId,
       content: trimmed,
-      attachments: [],
+      attachments: optimisticAttachments,
       createdAtISO,
       timestamp: new Date(createdAtISO).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       senderName: userName,
@@ -962,10 +1004,8 @@ export default function Room() {
       visibleTo: "All",
     };
 
-    // 1) Show immediately
     setMessages((prev) => [...prev, optimistic]);
 
-    // 2) Scroll to bottom
     requestAnimationFrame(() => {
       scrollerRef.current?.scrollTo({
         top: scrollerRef.current.scrollHeight,
@@ -974,19 +1014,22 @@ export default function Room() {
     });
 
     try {
-      // 3) Send to server (include clientNonce so echo can reconcile)
-      await chatApi.send({ roomId: activeRoomId, text: trimmed, files: fileArray, clientNonce, visibleTo: "All" });
+      await chatApi.send({
+        roomId: activeRoomId,
+        text: trimmed,
+        files: fileArray,
+        clientNonce,
+        visibleTo: "All",
+      });
 
-      // move 'pending' → 'sent'
       setMessages((prev) => {
         const idx = prev.findIndex((m) => m._id === tempId);
         if (idx === -1) return prev;
         const next = prev.slice();
-        next[idx] = { ...next[idx], status: "sent" };
+        next[idx] = { ...next[idx], status: "sent" }; // will become delivered on echo
         return next;
       });
     } catch (e) {
-      // failure: mark as failed
       setMessages((prev) => {
         const idx = prev.findIndex((m) => m._id === tempId);
         if (idx === -1) return prev;
@@ -1002,7 +1045,13 @@ export default function Room() {
     if (!message || message.status !== "failed") return;
     try {
       setMessages((prev) => prev.map((m) => (m._id === message._id ? { ...m, status: "pending", error: undefined } : m)));
-      await chatApi.send({ roomId: message.room, text: message.content, files: [], clientNonce: message.clientNonce, visibleTo: message.visibleTo || "All" });
+      await chatApi.send({
+        roomId: message.room,
+        text: message.content,
+        files: [], // retry without local files – rely on server if uploaded already
+        clientNonce: message.clientNonce,
+        visibleTo: message.visibleTo || "All",
+      });
       setMessages((prev) => prev.map((m) => (m._id === message._id ? { ...m, status: "sent" } : m)));
     } catch (e) {
       setMessages((prev) => prev.map((m) => (m._id === message._id ? { ...m, status: "failed", error: e?.message || "Failed again" } : m)));
@@ -1046,7 +1095,6 @@ export default function Room() {
   };
 
   /* ---------------------------- derived: grouping ---------------------------- */
-  // 🔒 apply role-based visibility filtering at render-level
   const visibleMessages = useMemo(() => {
     return (messages || []).filter((m) => canViewerSee(m, userRole));
   }, [messages, userRole]);
@@ -1166,12 +1214,10 @@ export default function Room() {
 
         {/* Chat Area */}
         <section className={`relative flex-1 min-w-0 flex flex-col overflow-hidden min-h-0 ${!activeRoomId && "hidden sm:flex"} bg-gray-50`}>
-          {/* Pinned wallpaper (NON-SCROLLING) */}
           <ChatBackground variant="staff" />
 
           {activeRoomId ? (
             <>
-              {/* Chat Header */}
               <div className="sticky top-0 z-30 bg-white border-b border-gray-200">
                 <ChatHeader
                   contact={headerContact}
@@ -1182,7 +1228,6 @@ export default function Room() {
                 />
               </div>
 
-              {/* Search Bar */}
               {showSearch && (
                 <div className="border-b bg-white z-20">
                   <SearchBar
@@ -1202,7 +1247,6 @@ export default function Room() {
                 </div>
               )}
 
-              {/* Close/Reopen banner */}
               {(canShowClose || canShowReopen) && (
                 <div className="sticky top-[48px] md:top-[56px] z-20 border-b border-gray-200 bg-white px-3 md:px-4 py-2 flex flex-wrap items-center justify-between gap-2">
                   {canShowClose && (
@@ -1251,7 +1295,6 @@ export default function Room() {
                 </div>
               )}
 
-              {/* Messages Area */}
               <div
                 ref={scrollerRef}
                 onScroll={handleScroll}
@@ -1261,7 +1304,6 @@ export default function Room() {
                 {visibleMessages.length ? (
                   grouped.map((g) => (
                     <div key={g.date.toISOString()} className="space-y-2.5">
-                      {/* Date separator */}
                       <div className="flex items-center justify-center my-4">
                         <div className="border rounded-full px-3 py-1 shadow-sm bg-gray-100 border-gray-200 text-gray-700">
                           <span className="text-[11px] font-medium">
@@ -1270,7 +1312,6 @@ export default function Room() {
                         </div>
                       </div>
 
-                      {/* Message list */}
                       <div className="space-y-2">
                         {g.list.map((m) => (
                           <div key={m._id} ref={(el) => (messageRefs.current[m._id] = el)}>
@@ -1370,24 +1411,66 @@ export default function Room() {
               const pid = project?.["_id"] || project?.id;
               if (!pid) throw new Error("No project found for this room.");
 
-              const payload = {
+              // 1) Create invoice via API
+              const { data } = await invoices.createInvoice({
                 projectId: pid,
                 amountDecimal,
                 currency: currency || "USD",
                 memo: memo || `Invoice for ${project?.projectTitle || "project"}`,
-              };
-
-              const { data } = await invoices.createInvoice(payload);
+              });
               const url = data?.hostedUrl || data?.invoiceUrl;
               if (!url) throw new Error("No invoice URL returned.");
 
-              const msg = `🧾 Invoice created — ${url}`;
+              // 2) Build optimistic PM-only message with a clientNonce
+              const clientNonce = genClientNonce();
+              const tempId = `tmp-${clientNonce}`;
+              const createdAtISO = new Date().toISOString();
+              const text = `🧾 Invoice created — ${url}`;
 
-              // mark the invoice message as PM+Client only
+              const optimistic = {
+                _id: tempId,
+                room: activeRoomId,
+                content: text,
+                attachments: [],
+                createdAtISO,
+                timestamp: new Date(createdAtISO).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                senderName: userName,
+                senderRole: userRole,
+                senderType: userRole,
+                isMine: true,
+                bubbleTheme: "me",
+                status: "pending",
+                clientNonce,
+                deliveredAt: null,
+                readAt: null,
+                visibleTo: "PM+Client",
+              };
+
+              // insert optimistic invoice message immediately for PM
+              setMessages((prev) => [...prev, optimistic]);
+
+              requestAnimationFrame(() => {
+                scrollerRef.current?.scrollTo({
+                  top: scrollerRef.current.scrollHeight,
+                  behavior: "smooth",
+                });
+              });
+
+              // 3) Send to chat with visibility restriction
               await chatApi.send({
                 roomId: activeRoomId,
-                text: msg,
+                text,
+                clientNonce,
                 visibleTo: "PM+Client",
+              });
+
+              // mark as sent (will become delivered on echo)
+              setMessages((prev) => {
+                const idx = prev.findIndex((m) => m._id === tempId);
+                if (idx === -1) return prev;
+                const next = prev.slice();
+                next[idx] = { ...next[idx], status: "sent" };
+                return next;
               });
 
               setShowInvoiceModal(false);

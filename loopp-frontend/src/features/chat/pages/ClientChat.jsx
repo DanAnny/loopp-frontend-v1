@@ -1729,7 +1729,7 @@ export default function ClientChat() {
       <div className="flex-none h-12 md:h-14 w-full border-b z-40 bg-white border-gray-200">
         <div className="h-full max-w-[1920px] mx-auto px-3 md:px-4 flex items-center justify-between">
           <a
-            href="/"
+            href="https://angelmap.foundryradar.com/"
             className="inline-flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm font-medium transition hover:bg-gray-100"
             title="Back"
           >

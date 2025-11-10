@@ -273,7 +273,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
-              className="w-full max-w-2xl bg-[#0f1729] rounded-2xl shadow-2xl border border-slate-700/50 max-h-[90vh] flex flex-col overflow-hidden"
+              className="w-full max-w-2xl bg-[#0f1729] rounded-2xl shadow-2xl border border-slate-700/50 max-h-[90vh] flex flex-col overflow-hidden overflow-x-hidden" // 👈 prevent horiz overflow
               onClick={(e)=>e.stopPropagation()}
             >
               {/* Top accent bar */}
@@ -303,7 +303,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
               </div>
 
               {/* Body (scrollable) */}
-              <div className="flex-1 overflow-y-auto p-5 space-y-5 bg-[#0f1729]">
+              <div className="flex-1 overflow-y-auto overflow-x-hidden p-5 space-y-5 bg-[#0f1729]"> {/* 👈 hide horiz */}
                 <AnimatePresence mode="wait">
                   {error && (
                     <motion.div
@@ -343,12 +343,12 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
                   {/* Empty state */}
                   {!loadingLists && requests.length === 0 ? (
                     <div className="flex items-center justify-between gap-3 p-4 rounded-xl bg-[#0f1729] border border-slate-700/50">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-white/5 border border-slate-700/50">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="p-2 rounded-lg bg-white/5 border border-slate-700/50 shrink-0">
                           <Inbox className="w-5 h-5 text-slate-400" />
                         </div>
-                        <div>
-                          <p className="text-slate-300 text-sm font-medium">No requests found</p>
+                        <div className="min-w-0">
+                          <p className="text-slate-300 text-sm font-medium truncate">No requests found</p>
                           <p className="text-slate-500 text-xs">There are no project requests to assign yet.</p>
                         </div>
                       </div>
@@ -357,37 +357,42 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
                         whileTap={{ scale: 0.95 }}
                         type="button"
                         onClick={loadLists}
-                        className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-slate-700/50 transition"
+                        className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-slate-700/50 transition shrink-0"
                       >
                         <Plus className="w-4 h-4 rotate-45 text-white" />
                       </motion.button>
                     </div>
                   ) : (
-                    <div className="flex gap-2">
-                      <select
-                        ref={firstFieldRef}
-                        value={form.uiRequestKey}
-                        onChange={(e) => onPickRequest(e.target.value)}
-                        disabled={loadingLists || loading || requests.length === 0}
-                        className="flex-1 px-4 py-3 rounded-xl bg-[#0f1729] border border-slate-700/50 focus:outline-none focus:border-slate-600 transition-all text-white disabled:opacity-50"
-                      >
-                        <option key="placeholder-option" value="">
-                          {loadingLists ? "Loading…" : "Select a request…"}
-                        </option>
-                        {requests.map((r) => (
-                          <option key={`req-${r.__uiKey}`} value={r.__uiKey}>
-                            {(r.projectTitle || r.title || "Untitled")}
-                            {r.engineerAssigned ? " • (Assigned)" : ""}
+                    <div className="flex gap-2 min-w-0"> {/* 👈 allow shrink */}
+                      <div className="relative flex-1 min-w-0"> {/* 👈 constrain select */}
+                        <select
+                          ref={firstFieldRef}
+                          value={form.uiRequestKey}
+                          onChange={(e) => onPickRequest(e.target.value)}
+                          disabled={loadingLists || loading || requests.length === 0}
+                          className="block w-full min-w-0 px-4 py-3 pr-10 rounded-xl bg-[#0f1729] border border-slate-700/50 focus:outline-none focus:border-slate-600 transition-all text-white disabled:opacity-50 appearance-none overflow-hidden"
+                        >
+                          <option key="placeholder-option" value="">
+                            {loadingLists ? "Loading…" : "Select a request…"}
                           </option>
-                        ))}
-                      </select>
+                          {requests.map((r) => (
+                            <option key={`req-${r.__uiKey}`} value={r.__uiKey}>
+                              {(r.projectTitle || r.title || "Untitled")}{r.engineerAssigned ? " • (Assigned)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                        {/* Custom caret to avoid native overflow quirks */}
+                        <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                          ▼
+                        </div>
+                      </div>
                       <motion.button
                         whileHover={{ rotate: 180, scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
                         type="button"
                         onClick={loadLists}
                         disabled={loadingLists || loading}
-                        className="px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-slate-700/50 disabled:opacity-50 transition-all"
+                        className="px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-slate-700/50 disabled:opacity-50 transition-all shrink-0" // 👈 don't grow
                         title="Reload"
                       >
                         {loadingLists ? <Loader2 className="w-5 h-5 animate-spin text-white" /> : <Plus className="w-5 h-5 rotate-45 text-white" />}
@@ -418,14 +423,14 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
                   className="bg-[#1a2332] border border-slate-700/50 rounded-xl p-4"
                 >
                   <label className="block text-xs uppercase tracking-[0.15em] text-slate-400 mb-3">Engineer Assignment</label>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
                     <motion.button
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       type="button"
                       disabled={!form.requestId || loadingLists || loading}
                       onClick={() => setPickOpen(true)}
-                      className="inline-flex items-center gap-2 rounded-xl px-4 py-3 bg-white/5 hover:bg-white/10 border border-slate-700/50 disabled:opacity-50 transition-all"
+                      className="inline-flex items-center gap-2 rounded-xl px-4 py-3 bg-white/5 hover:bg-white/10 border border-slate-700/50 disabled:opacity-50 transition-all shrink-0"
                     >
                       <UsersIcon className="w-5 h-5 text-white" />
                       <span className="text-white">{form.engineerId ? `Change (${form.engineerName})` : "Select Engineer"}</span>
@@ -435,10 +440,10 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
                         initial={{ opacity: 0, x: -5 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ duration: 0.15 }}
-                        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300"
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 min-w-0"
                       >
-                        <Check className="w-4 h-4" />
-                        <span className="font-medium">{form.engineerName}</span>
+                        <Check className="w-4 h-4 shrink-0" />
+                        <span className="font-medium truncate">{form.engineerName}</span>
                       </motion.div>
                     )}
                   </div>
@@ -572,10 +577,10 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
                 >
                   <div className="w-full max-w-lg bg-[#1a2332] rounded-2xl border border-slate-700/50 shadow-2xl p-6" onClick={(e)=>e.stopPropagation()}>
                     <div className="flex items-start gap-4">
-                      <div className="p-3 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                      <div className="p-3 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/30 shrink-0">
                         <AlertTriangle className="w-6 h-6" />
                       </div>
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-0">
                         <h4 className="text-white mb-2">Engineer Capacity Warning</h4>
                         <p className="text-sm text-slate-300 mb-3">
                           <span className="font-medium">{warn.engineer.firstName} {warn.engineer.lastName}</span> is currently {warn.engineer.isBusy ? "busy" : "handling tasks"} with <span className="font-medium">{warn.engineer.numberOfTask || 0} active task(s)</span>.
@@ -650,7 +655,7 @@ function Field({ label, icon: Icon, children, onIconClick }) {
   return (
     <div>
       <label className="block text-xs uppercase tracking-[0.15em] text-slate-400 mb-2">{label}</label>
-      <div className="relative">
+      <div className="relative min-w-0">
         {Icon && (
           <button
             type="button"
@@ -662,7 +667,7 @@ function Field({ label, icon: Icon, children, onIconClick }) {
           </button>
         )}
         {/* pad for icon */}
-        <div className={`${Icon ? "pl-8" : ""}`}>{children}</div>
+        <div className={`${Icon ? "pl-8" : ""} min-w-0`}>{children}</div>
       </div>
     </div>
   );
@@ -670,11 +675,11 @@ function Field({ label, icon: Icon, children, onIconClick }) {
 
 function RO({ label, icon: Icon, value }) {
   return (
-    <div>
+    <div className="min-w-0">
       <label className="block text-xs uppercase tracking-[0.15em] text-slate-500 mb-2">{label}</label>
       <div className="relative">
-        <div className="px-4 py-2.5 pl-11 rounded-xl bg-[#0f1729] border border-slate-700/50 text-slate-300 text-sm min-h-[44px] flex items-center">
-          {value}
+        <div className="px-4 py-2.5 pl-11 rounded-xl bg-[#0f1729] border border-slate-700/50 text-slate-300 text-sm min-h-[44px] flex items-center overflow-hidden">
+          <span className="truncate">{value}</span>
         </div>
         {Icon && <Icon className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />}
       </div>
@@ -703,7 +708,7 @@ function EngineerPicker({ open, onClose, engineers, onPick }) {
       >
         <div className="w-full max-w-2xl bg-[#0f1729] rounded-2xl border border-slate-700/50 shadow-2xl overflow-hidden" onClick={(e)=>e.stopPropagation()}>
           <div className="px-5 py-4 border-b border-slate-700/50 bg-[#1a2332] flex items-center justify-between">
-            <div>
+            <div className="min-w-0">
               <h3 className="text-white">Select Engineer</h3>
               <p className="text-xs text-slate-400 uppercase tracking-[0.15em] mt-0.5">Available team members</p>
             </div>
@@ -726,7 +731,7 @@ function EngineerPicker({ open, onClose, engineers, onPick }) {
                 whileHover={{ scale: 1.02, y: -2 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={() => onPick(e)}
-                className="group text-left p-4 rounded-xl bg-[#1a2332] border border-slate-700/50 hover:border-slate-600 hover:shadow-lg transition-all"
+                className="group text-left p-4 rounded-xl bg-[#1a2332] border border-slate-700/50 hover:border-slate-600 hover:shadow-lg transition-all min-w-0"
               >
                 <div className="flex items-center justify-between mb-2">
                   <p className="font-medium truncate text-white">{e.firstName} {e.lastName}</p>

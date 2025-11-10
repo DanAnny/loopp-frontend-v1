@@ -26,11 +26,19 @@ import { initGridFS } from "./src/lib/gridfs.js";
 import * as projectService from "./src/services/project.service.js";
 import { ONLINE_WINDOW_MS } from "./src/services/pm-selection.service.js";
 
+// Documentation
+import { readFileSync } from "fs";
+import YAML from "yaml";
+import swaggerUi from "swagger-ui-express";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
+
+const openapiPath = path.resolve(__dirname, "docs", "openapi.yaml");
+const openapiDoc = YAML.parse(readFileSync(openapiPath, "utf8"));
 
 // ---------- HTTP server tuning ----------
 server.keepAliveTimeout = 75_000;
@@ -168,6 +176,17 @@ app.use(
 
 app.use(passport.initialize());
 app.use(passport.session());
+
+//Swagger Doc
+const swaggerOpts = {
+  swaggerOptions: {
+    persistAuthorization: true,
+  },
+};
+
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(openapiDoc, {
+  explorer: true,
+}));
 
 // ---------- DB connect, gridfs ----------
 await connectDB();

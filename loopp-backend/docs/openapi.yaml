@@ -1,0 +1,966 @@
+openapi: 3.1.0
+info:
+  title: Loopp API
+  version: 0.2.0
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  description: 'Loopp backend HTTP API.
+
+    '
+servers:
+  - url: http://localhost:5500/api
+    description: Local Dev
+  - url: https://loopp-backend-v1.onrender.com/api
+    description: Staging (Render)
+  - url: https://api.loopp.app/api
+    description: Production
+security:
+- bearerAuth: []
+tags:
+- name: Auth
+  description: Authentication and session flows.
+- name: Projects
+  description: Project request lifecycle and reads.
+- name: Tasks
+  description: Engineer task workflow.
+- name: Chat
+  description: Chat rooms and messaging.
+- name: Users
+  description: User directory and role-restricted lists.
+- name: Dashboard
+  description: Admin/SuperAdmin overview.
+- name: Management
+  description: Administrative management actions.
+- name: Notifications
+  description: Per-user notifications.
+- name: Integrations
+  description: Billing, Zoom and webhooks.
+paths:
+  /auth/signup-superadmin:
+    post:
+      tags:
+      - Auth
+      summary: Sign up SuperAdmin
+      operationId: authSignupSuperadmin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Created
+        '400':
+          description: Bad request
+  /auth/customer/signup:
+    post:
+      tags:
+      - Auth
+      summary: Public client signup
+      operationId: authCustomerSignup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Created
+        '400':
+          description: Bad request
+  /auth/add-user:
+    post:
+      tags:
+      - Auth
+      summary: Add user (Admin/SuperAdmin)
+      operationId: authAddUser
+      security:
+      - bearerAuth: []
+      responses:
+        '201':
+          description: Created
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /auth/signin:
+    post:
+      tags:
+      - Auth
+      summary: Sign in
+      operationId: authSignin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Authenticated
+          headers:
+            Set-Cookie:
+              description: Optional auth cookie
+              schema:
+                type: string
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid credentials
+  /auth/refresh:
+    post:
+      tags:
+      - Auth
+      summary: Refresh token
+      operationId: authRefresh
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+  /auth/logout:
+    post:
+      tags:
+      - Auth
+      summary: Logout
+      operationId: authLogout
+      responses:
+        '204':
+          description: No Content
+        '401':
+          description: Unauthorized
+  /projects/intake:
+    post:
+      tags:
+      - Projects
+      summary: Intake from WordPress
+      operationId: projectsIntakeFromWordPress
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad request
+  /projects/client/create:
+    post:
+      tags:
+      - Projects
+      summary: Client creates project
+      operationId: projectsClientCreate
+      security:
+      - bearerAuth: []
+      responses:
+        '201':
+          description: Created
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+  /projects/client/request-reopen:
+    post:
+      tags:
+      - Projects
+      summary: Client requests reopen
+      operationId: projectsClientRequestReopen
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+  /projects/public/by-key/{clientKey}:
+    get:
+      tags:
+      - Projects
+      summary: Public read by clientKey
+      operationId: projectsPublicByKey
+      parameters:
+      - in: path
+        name: clientKey
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Not Found
+  /projects:
+    get:
+      tags:
+      - Projects
+      summary: List projects (PM/Admin)
+      operationId: projectsList
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /projects/overview:
+    get:
+      tags:
+      - Projects
+      summary: Overview (PM/Admin)
+      operationId: projectsOverview
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /projects/{id}:
+    get:
+      tags:
+      - Projects
+      summary: Get project by id (PM/Admin)
+      operationId: projectsGetById
+      security:
+      - bearerAuth: []
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Not Found
+  /projects/by-room/{roomId}:
+    get:
+      tags:
+      - Projects
+      summary: Get by room (PM/Admin)
+      operationId: projectsGetByRoom
+      security:
+      - bearerAuth: []
+      parameters:
+      - in: path
+        name: roomId
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Not Found
+  /projects/by-room/{roomId}/named:
+    get:
+      tags:
+      - Projects
+      summary: Get by room (named response)
+      operationId: projectsGetByRoomNamed
+      security:
+      - bearerAuth: []
+      parameters:
+      - in: path
+        name: roomId
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Not Found
+  /projects/by-room/{roomId}/meta:
+    get:
+      tags:
+      - Projects
+      summary: Get minimal public room meta
+      operationId: projectsGetRoomMeta
+      parameters:
+      - in: path
+        name: roomId
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Not Found
+  /projects/assign-engineer:
+    post:
+      tags:
+      - Projects
+      summary: Assign engineer (PM)
+      operationId: projectsAssignEngineer
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '409':
+          description: Conflict
+  /projects/engineer/accept:
+    post:
+      tags:
+      - Projects
+      summary: Engineer accepts request
+      operationId: projectsEngineerAccept
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /projects/review:
+    post:
+      tags:
+      - Projects
+      summary: Engineer marks request in review
+      operationId: projectsEngineerMarkReview
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /projects/rate:
+    post:
+      tags:
+      - Projects
+      summary: Client rates request
+      operationId: projectsRate
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad request
+  /projects/close:
+    post:
+      tags:
+      - Projects
+      summary: PM closes request
+      operationId: projectsClose
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /projects/reopen:
+    post:
+      tags:
+      - Projects
+      summary: PM reopens request
+      operationId: projectsReopen
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /projects/named:
+    get:
+      tags:
+      - Projects
+      summary: List projects (named)
+      operationId: projectsListNamed
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /projects/{id}/named:
+    get:
+      tags:
+      - Projects
+      summary: Get project by id (named)
+      operationId: projectsGetByIdNamed
+      security:
+      - bearerAuth: []
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Not Found
+  /tasks/create:
+    post:
+      tags:
+      - Tasks
+      summary: Create task (PM)
+      operationId: tasksCreate
+      security:
+      - bearerAuth: []
+      responses:
+        '201':
+          description: Created
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /tasks/accept:
+    post:
+      tags:
+      - Tasks
+      summary: Accept task (Engineer)
+      operationId: tasksAccept
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /tasks/complete:
+    post:
+      tags:
+      - Tasks
+      summary: Complete task (Engineer)
+      operationId: tasksComplete
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /tasks/engineer/{engineerId}:
+    get:
+      tags:
+      - Tasks
+      summary: List engineer tasks
+      operationId: tasksListByEngineer
+      security:
+      - bearerAuth: []
+      parameters:
+      - in: path
+        name: engineerId
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /tasks/engineer/{engineerId}/summary:
+    get:
+      tags:
+      - Tasks
+      summary: Engineer task summary
+      operationId: tasksSummaryByEngineer
+      security:
+      - bearerAuth: []
+      parameters:
+      - in: path
+        name: engineerId
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /chat/send:
+    post:
+      tags:
+      - Chat
+      summary: Staff send message (multipart)
+      operationId: chatSend
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                roomId:
+                  type: string
+                text:
+                  type: string
+      responses:
+        '201':
+          description: Sent
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+  /chat/{roomId}/messages:
+    get:
+      tags:
+      - Chat
+      summary: Get messages by room (staff)
+      operationId: chatGetMessages
+      security:
+      - bearerAuth: []
+      parameters:
+      - in: path
+        name: roomId
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '404':
+          description: Not Found
+  /chat/my-rooms:
+    get:
+      tags:
+      - Chat
+      summary: List my rooms (staff)
+      operationId: chatMyRooms
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+  /chat/room/key/{key}:
+    get:
+      tags:
+      - Chat
+      summary: Get room by key (staff)
+      operationId: chatGetRoomByKey
+      security:
+      - bearerAuth: []
+      parameters:
+      - in: path
+        name: key
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '404':
+          description: Not Found
+  /chat/client/send:
+    post:
+      tags:
+      - Chat
+      summary: Public client-key send message (multipart)
+      operationId: chatClientSend
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                key:
+                  type: string
+                text:
+                  type: string
+      responses:
+        '201':
+          description: Sent
+        '400':
+          description: Bad request
+  /chat/client/{requestId}/messages:
+    get:
+      tags:
+      - Chat
+      summary: Public client-key messages
+      operationId: chatClientGetMessages
+      parameters:
+      - in: path
+        name: requestId
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Not Found
+  /chat/my-client-rooms:
+    get:
+      tags:
+      - Chat
+      summary: Client-auth rooms
+      operationId: chatMyClientRooms
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+  /chat/client-room/{roomId}/messages:
+    get:
+      tags:
+      - Chat
+      summary: Client-auth room messages
+      operationId: chatClientRoomMessages
+      security:
+      - bearerAuth: []
+      parameters:
+      - in: path
+        name: roomId
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '404':
+          description: Not Found
+  /chat/client-room/send:
+    post:
+      tags:
+      - Chat
+      summary: Client-auth send message (multipart)
+      operationId: chatClientRoomSend
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                roomId:
+                  type: string
+                text:
+                  type: string
+      responses:
+        '201':
+          description: Sent
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+  /users/engineers:
+    get:
+      tags:
+      - Users
+      summary: List engineers (PM/Admin/SuperAdmin)
+      operationId: usersGetEngineers
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /users/pms:
+    get:
+      tags:
+      - Users
+      summary: List PMs (Admin/SuperAdmin)
+      operationId: usersGetPMs
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /users:
+    get:
+      tags:
+      - Users
+      summary: List users (PM/Admin/SuperAdmin)
+      operationId: usersGetAll
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /dashboard/overview:
+    get:
+      tags:
+      - Dashboard
+      summary: Admin dashboard overview
+      operationId: dashboardOverview
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /management/overview:
+    get:
+      tags:
+      - Management
+      summary: Management overview
+      operationId: managementOverview
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /management/audits:
+    get:
+      tags:
+      - Management
+      summary: Recent audits
+      operationId: managementAudits
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /management/users/bulk:
+    patch:
+      tags:
+      - Management
+      summary: Bulk update users
+      operationId: managementBulkUpdateUsers
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /management/users/{id}/toggle:
+    patch:
+      tags:
+      - Management
+      summary: Quick toggle user
+      operationId: managementQuickToggleUser
+      security:
+      - bearerAuth: []
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /notifications:
+    get:
+      tags:
+      - Notifications
+      summary: List my notifications
+      operationId: notificationsList
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+  /notifications/read:
+    post:
+      tags:
+      - Notifications
+      summary: Mark notification read
+      operationId: notificationsMarkRead
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+  /notifications/read-all:
+    post:
+      tags:
+      - Notifications
+      summary: Mark all notifications read
+      operationId: notificationsMarkAllRead
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+  /integrations/billing/invoices:
+    post:
+      tags:
+      - Integrations
+      summary: Create hosted invoice (Stripe)
+      operationId: integrationsCreateHostedInvoice
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+  /integrations/zoom/meetings:
+    post:
+      tags:
+      - Integrations
+      summary: Create Zoom meeting (PM only)
+      operationId: integrationsCreateZoomMeeting
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /integrations/stripe/webhook:
+    post:
+      tags:
+      - Integrations
+      summary: Stripe webhook (raw body)
+      operationId: integrationsStripeWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad signature
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

@@ -17,7 +17,7 @@ import InlineNotification from "@/features/chat/components/InlineNotification";
 import ChatBackground from "@/features/chat/components/ChatBackground";
 import UnreadMessagesIndicator from "@/features/chat/components/UnreadMessagesIndicator";
 import InvoiceModal from "../components/InvoiceModal";
-import ZoomModal from "../components/ZoomModal";
+// import ZoomModal from "../components/ZoomModal"; // ⛔️ disabled per request
 
 // within ~Room.jsx
 
@@ -123,21 +123,29 @@ function previewText(m) {
   return m.content || "—";
 }
 
+/* --------------------------- visibility helpers --------------------------- */
+function normalizeVisibleTo(v) {
+  const s = String(v || "All").trim();
+  if (/^pm\s*\+\s*client$/i.test(s)) return "PM+Client";
+  if (/^pm$/i.test(s)) return "PM";
+  if (/^client$/i.test(s)) return "Client";
+  return "All";
+}
+function canViewerSee(m, viewerRole) {
+  const v = normalizeVisibleTo(m.visibleTo);
+  const r = normalizeRole(viewerRole);
+  if (v === "All") return true;
+  if (v === "PM") return r === "PM";
+  if (v === "Client") return r === "Client";
+  if (v === "PM+Client") return r === "PM" || r === "Client";
+  return true;
+}
+
 /* --------------------------- optimistic utilities --------------------------- */
 const genClientNonce = () =>
   Math.random().toString(36).slice(2) + "-" + Date.now().toString(36);
 
 function normalizeIncoming(m, meId, dir = {}) {
-  // NOTE: never hide client-visible system messages here unless intended
-  // (Your old filter hid some System→Client; I’ll keep your logic but safer)
-  if (
-    String(m.senderType || "").toLowerCase() === "system" &&
-    String(m.visibleTo || "All") === "Client"
-  ) {
-    // visible to Client => keep; if you intended to HIDE from Client UI only,
-    // move that condition to the render layer where you know the viewer role.
-  }
-
   const rawSender = m.sender || m.user || {};
   const senderId = (
     typeof rawSender === "string" ? rawSender : rawSender._id || rawSender.id || ""
@@ -204,10 +212,13 @@ function normalizeIncoming(m, meId, dir = {}) {
     attachments,
 
     // delivery state – server should include if available
-    status: m.status || (isMine ? "delivered" : "delivered"), // default to delivered for server-fed messages
+    status: m.status || (isMine ? "delivered" : "delivered"),
     clientNonce: m.clientNonce || null,
     deliveredAt: m.deliveredAt || null,
-    readAt: m.readAt || null
+    readAt: m.readAt || null,
+
+    // NEW: visibility
+    visibleTo: normalizeVisibleTo(m.visibleTo),
   };
 
   shaped.bubbleTheme = roleToTheme(role, isMine);
@@ -426,7 +437,7 @@ export default function Room() {
 
   // PM actions
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
-  const [showZoomModal, setShowZoomModal] = useState(false);
+  // const [showZoomModal, setShowZoomModal] = useState(false); // ⛔️ disabled
 
   // UI-only state
   const [showSidebar, setShowSidebar] = useState(false);
@@ -636,7 +647,7 @@ export default function Room() {
           const rid = String(shaped.room || activeRoomId);
 
           if (shaped.isMine) {
-            // 1) If we have a nonce, reconcile by nonce.
+            // Reconcile-by-nonce first
             if (shaped.clientNonce) {
               setMessages((prev) => {
                 const idx = prev.findIndex(
@@ -651,17 +662,30 @@ export default function Room() {
                     deliveredAt: shaped.deliveredAt || new Date().toISOString(),
                     createdAtISO: shaped.createdAtISO || prevMsg.createdAtISO,
                     timestamp: shaped.timestamp || prevMsg.timestamp,
+                    visibleTo: shaped.visibleTo || prevMsg.visibleTo,
                   };
                   const next = prev.slice();
                   next[idx] = merged;
                   return next;
                 }
-                // fallback: fuzzy reconcile without nonce
-                return reconcileMineWithoutNonce(prev, shaped);
+                // fallback: fuzzy reconcile without nonce; and if no change, APPEND
+                const next = reconcileMineWithoutNonce(prev, shaped);
+                if (next === prev) {
+                  if (prev.some((x) => x._id === shaped._id)) return prev;
+                  return [...prev, shaped]; // <— ensures PM sees their own non-optimistic message (like invoice)
+                }
+                return next;
               });
             } else {
-              // no nonce at all — fuzzy reconcile
-              setMessages((prev) => reconcileMineWithoutNonce(prev, shaped));
+              // no nonce at all — fuzzy reconcile; and if not replaced, append
+              setMessages((prev) => {
+                const next = reconcileMineWithoutNonce(prev, shaped);
+                if (next === prev) {
+                  if (prev.some((x) => x._id === shaped._id)) return prev;
+                  return [...prev, shaped];
+                }
+                return next;
+              });
             }
           } else {
             // messages from others (or mine already reconciled): keep sidebar/ordering fresh
@@ -722,7 +746,6 @@ export default function Room() {
         };
 
         const onDelivered = ({ messageId, clientNonce }) => {
-          // Optional: if your backend emits a dedicated delivered event
           setMessages((prev) => {
             const idx = prev.findIndex(
               (m) => (clientNonce && m.clientNonce === clientNonce) || m._id === messageId
@@ -779,8 +802,8 @@ export default function Room() {
 
         s2?.on("message", onMessage);
         s2?.on("typing", onTyping);
-        s2?.on("delivered", onDelivered); // if supported by backend
-        s2?.on("read", onRead); // if supported by backend
+        s2?.on("delivered", onDelivered);
+        s2?.on("read", onRead);
         s2?.on("rated", onRated);
         s2?.on("room:closed", onRoomClosed);
         s2?.on("room:reopened", onRoomReopened);
@@ -867,7 +890,7 @@ export default function Room() {
     if (userRole !== "PM") return [];
     return [
       { id: "invoice", title: "Generate an invoice", subtitle: "Create a Stripe hosted invoice for this project", hint: "invoice" },
-      { id: "zoom", title: "Generate a Zoom meeting link", subtitle: "Create an instant Zoom room for this project", hint: "zoom" },
+      // { id: "zoom", title: "Generate a Zoom meeting link", subtitle: "Create an instant Zoom room for this project", hint: "zoom" }, // ⛔️ disabled
     ];
   }, [userRole]);
 
@@ -878,10 +901,7 @@ export default function Room() {
         setShowInvoiceModal(true);
         return;
       }
-      if (cmd.id === "zoom") {
-        setShowZoomModal(true);
-        return;
-      }
+      // if (cmd.id === "zoom") { setShowZoomModal(true); return; } // ⛔️ disabled
     } catch (e) {
       setErr(e?.response?.data?.message || e?.message || "Failed to run command");
     }
@@ -927,7 +947,7 @@ export default function Room() {
       _id: tempId,
       room: activeRoomId,
       content: trimmed,
-      attachments: [], // show after upload if you implement optimistic file previews
+      attachments: [],
       createdAtISO,
       timestamp: new Date(createdAtISO).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       senderName: userName,
@@ -935,10 +955,11 @@ export default function Room() {
       senderType: userRole,
       isMine: true,
       bubbleTheme: "me",
-      status: "pending",           // <- key
-      clientNonce,                 // <- reconcile key
+      status: "pending",
+      clientNonce,
       deliveredAt: null,
-      readAt: null
+      readAt: null,
+      visibleTo: "All",
     };
 
     // 1) Show immediately
@@ -954,21 +975,18 @@ export default function Room() {
 
     try {
       // 3) Send to server (include clientNonce so echo can reconcile)
-      await chatApi.send({ roomId: activeRoomId, text: trimmed, files: fileArray, clientNonce });
+      await chatApi.send({ roomId: activeRoomId, text: trimmed, files: fileArray, clientNonce, visibleTo: "All" });
 
-      // If your backend does NOT echo the nonce, you could fallback-set "sent" here,
-      // then upgrade to "delivered" on socket echo. If it does echo, the onMessage
-      // handler above will replace this optimistic one with the real message and set 'delivered'.
+      // move 'pending' → 'sent'
       setMessages((prev) => {
         const idx = prev.findIndex((m) => m._id === tempId);
         if (idx === -1) return prev;
         const next = prev.slice();
-        // Move from 'pending' → 'sent' (will become 'delivered' when echoed)
         next[idx] = { ...next[idx], status: "sent" };
         return next;
       });
     } catch (e) {
-      // 4) Failure: flag as failed
+      // failure: mark as failed
       setMessages((prev) => {
         const idx = prev.findIndex((m) => m._id === tempId);
         if (idx === -1) return prev;
@@ -984,7 +1002,7 @@ export default function Room() {
     if (!message || message.status !== "failed") return;
     try {
       setMessages((prev) => prev.map((m) => (m._id === message._id ? { ...m, status: "pending", error: undefined } : m)));
-      await chatApi.send({ roomId: message.room, text: message.content, files: [], clientNonce: message.clientNonce });
+      await chatApi.send({ roomId: message.room, text: message.content, files: [], clientNonce: message.clientNonce, visibleTo: message.visibleTo || "All" });
       setMessages((prev) => prev.map((m) => (m._id === message._id ? { ...m, status: "sent" } : m)));
     } catch (e) {
       setMessages((prev) => prev.map((m) => (m._id === message._id ? { ...m, status: "failed", error: e?.message || "Failed again" } : m)));
@@ -1028,10 +1046,15 @@ export default function Room() {
   };
 
   /* ---------------------------- derived: grouping ---------------------------- */
+  // 🔒 apply role-based visibility filtering at render-level
+  const visibleMessages = useMemo(() => {
+    return (messages || []).filter((m) => canViewerSee(m, userRole));
+  }, [messages, userRole]);
+
   const grouped = useMemo(() => {
-    if (!messages?.length) return [];
+    if (!visibleMessages?.length) return [];
     const map = {};
-    for (const m of messages) {
+    for (const m of visibleMessages) {
       const d = new Date(m.createdAtISO || Date.now());
       const key = d.toDateString();
       if (!map[key]) map[key] = [];
@@ -1040,7 +1063,7 @@ export default function Room() {
     return Object.keys(map)
       .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
       .map((k) => ({ date: new Date(k), list: map[k] }));
-  }, [messages]);
+  }, [visibleMessages]);
 
   /* ---------------------------------- UI ---------------------------------- */
   if (loading) {
@@ -1163,10 +1186,10 @@ export default function Room() {
               {showSearch && (
                 <div className="border-b bg-white z-20">
                   <SearchBar
-                    messages={messages}
+                    messages={visibleMessages}
                     onClose={() => setShowSearch(false)}
                     onResultSelect={(index) => {
-                      const msg = messages[index];
+                      const msg = visibleMessages[index];
                       if (!msg) return;
                       const el = messageRefs.current[msg._id];
                       if (el) {
@@ -1235,7 +1258,7 @@ export default function Room() {
                 className="relative z-10 flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-3 min-h-0
                            scroll-smooth"
               >
-                {messages.length ? (
+                {visibleMessages.length ? (
                   grouped.map((g) => (
                     <div key={g.date.toISOString()} className="space-y-2.5">
                       {/* Date separator */}
@@ -1307,7 +1330,7 @@ export default function Room() {
                     commands={userRole === "PM"
                       ? [
                           { id: "invoice", title: "Generate an invoice", subtitle: "Create a Stripe hosted invoice for this project", hint: "invoice" },
-                          { id: "zoom", title: "Generate a Zoom meeting link", subtitle: "Create an instant Zoom room for this project", hint: "zoom" },
+                          // { id: "zoom", title: "Generate a Zoom meeting link", subtitle: "Create an instant Zoom room for this project", hint: "zoom" },
                         ]
                       : []}
                     onCommandRun={handleRunCommand}
@@ -1359,7 +1382,13 @@ export default function Room() {
               if (!url) throw new Error("No invoice URL returned.");
 
               const msg = `🧾 Invoice created — ${url}`;
-              await chatApi.send({ roomId: activeRoomId, text: msg });
+
+              // mark the invoice message as PM+Client only
+              await chatApi.send({
+                roomId: activeRoomId,
+                text: msg,
+                visibleTo: "PM+Client",
+              });
 
               setShowInvoiceModal(false);
               setNotifications((p) => [
@@ -1377,6 +1406,8 @@ export default function Room() {
           }}
         />
       )}
+
+      {/* ⛔️ Zoom disabled
       {showZoomModal && userRole === "PM" && (
         <ZoomModal
           projectTitle={project?.projectTitle}
@@ -1392,7 +1423,6 @@ export default function Room() {
                 durationMinutes,
               });
 
-              // Expect: res.join_url, res.start_url, res.meeting_id, res.password
               const parts = [];
               if (res.join_url) parts.push(`Join: ${res.join_url}`);
               if (res.start_url) parts.push(`Host: ${res.start_url}`);
@@ -1400,7 +1430,7 @@ export default function Room() {
               if (res.password) parts.push(`Passcode: ${res.password}`);
 
               const msg = `🎥 Zoom meeting created — ${parts.join("  •  ")}`;
-              await chatApi.send({ roomId: activeRoomId, text: msg });
+              await chatApi.send({ roomId: activeRoomId, text: msg, visibleTo: "All" });
 
               setShowZoomModal(false);
               setNotifications((p) => [
@@ -1412,7 +1442,7 @@ export default function Room() {
             }
           }}
         />
-      )}
+      )} */}
     </div>
   );
 }

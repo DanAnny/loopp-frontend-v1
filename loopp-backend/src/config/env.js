@@ -12,6 +12,7 @@ export const config = {
   port: process.env.PORT || 5500,
   mongoURI: process.env.MONGODB_URI,
   corsOrigin: process.env.CORS_ORIGIN,
+  appUrl: process.env.APP_URL || "http://localhost:3000",
   smtp: {
     // ⬇️ keep mail disabled by default
     enabled: String(process.env.SMTP_ENABLED || "").toLowerCase() === "true",

@@ -124,17 +124,22 @@ function normalizeAttachment(att) {
 }
 
 /* --------------------------- delivery status UI --------------------------- */
-function DeliveryBadge({ status, createdAtISO, onRetry }) {
+function DeliveryBadge({ status, createdAtISO, timeText, isMine, onRetry }) {
   // status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed'
-  const time = new Date(createdAtISO || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const time =
+    timeText ||
+    new Date(createdAtISO || Date.now()).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
 
   if (status === "failed") {
     return (
-      <div className="mt-1 mb-2 text-[10px] flex items-center gap-2 justify-end text-red-300">
+      <div className={`mt-1 mb-2 text-[10px] flex items-center gap-2 justify-end ${isMine ? "text-red-200" : "text-red-700"}`}>
         <span>Failed • {time}</span>
         <button
           onClick={onRetry}
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-100"
+          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded ${isMine ? "bg-red-500/20 hover:bg-red-500/30 text-red-100" : "bg-red-100 hover:bg-red-200 text-red-700"}`}
           title="Retry send"
         >
           <RefreshCw className="w-3.5 h-3.5" /> Retry
@@ -145,7 +150,7 @@ function DeliveryBadge({ status, createdAtISO, onRetry }) {
 
   if (status === "pending") {
     return (
-      <div className="mt-1 mb-2 text-[10px] flex items-center gap-1.5 justify-end text-white/70 whitespace-nowrap">
+      <div className={`mt-1 mb-2 text-[10px] flex items-center gap-1.5 justify-end ${isMine ? "text-white/70" : "text-black/50"} whitespace-nowrap`}>
         <Loader2 className="w-3.5 h-3.5 animate-spin" />
         <span>{time}</span>
       </div>
@@ -154,7 +159,7 @@ function DeliveryBadge({ status, createdAtISO, onRetry }) {
 
   if (status === "sent") {
     return (
-      <div className="mt-1 mb-2 text-[10px] flex items-center gap-1.5 justify-end text-white/70 whitespace-nowrap">
+      <div className={`mt-1 mb-2 text-[10px] flex items-center gap-1.5 justify-end ${isMine ? "text-white/70" : "text-black/50"} whitespace-nowrap`}>
         <Check className="w-3.5 h-3.5 opacity-80" />
         <span>{time}</span>
       </div>
@@ -163,7 +168,7 @@ function DeliveryBadge({ status, createdAtISO, onRetry }) {
 
   if (status === "delivered") {
     return (
-      <div className="mt-1 mb-2 text-[10px] flex items-center gap-1.5 justify-end text-white/70 whitespace-nowrap">
+      <div className={`mt-1 mb-2 text-[10px] flex items-center gap-1.5 justify-end ${isMine ? "text-white/70" : "text-black/50"} whitespace-nowrap`}>
         <CheckCheck className="w-3.5 h-3.5 opacity-80" />
         <span>{time}</span>
       </div>
@@ -172,16 +177,16 @@ function DeliveryBadge({ status, createdAtISO, onRetry }) {
 
   if (status === "read") {
     return (
-      <div className="mt-1 mb-2 text-[10px] flex items-center gap-1.5 justify-end text-emerald-200 whitespace-nowrap">
+      <div className={`mt-1 mb-2 text-[10px] flex items-center gap-1.5 justify-end ${isMine ? "text-emerald-200" : "text-emerald-700"} whitespace-nowrap`}>
         <CheckCheck className="w-3.5 h-3.5" />
         <span>{time}</span>
       </div>
     );
   }
 
-  // fallback (for non-mine messages)
+  // Fallback: still show time, but color depends on who sent it
   return (
-    <div className="mt-1 mb-2 text-[10px] flex items-center gap-1.5 justify-end text-black/50 whitespace-nowrap">
+    <div className={`mt-1 mb-2 text-[10px] flex items-center gap-1.5 justify-end ${isMine ? "text-white/70" : "text-black/50"} whitespace-nowrap`}>
       <span>{time}</span>
     </div>
   );
@@ -193,7 +198,7 @@ export default function MessageBubble({
   highlighted = false,
   onEdit,
   onDelete,
-  onRetry, // <- added for failed resend
+  onRetry, // <- for failed resend
 }) {
   const [imgError, setImgError] = useState({});
   const [contextMenu, setContextMenu] = useState(null);
@@ -288,6 +293,19 @@ export default function MessageBubble({
 
   const headerRole = rawRole;
   const showHeader = message.bubbleTheme !== "system";
+
+  /* ----------------------- effective status + time --------------------------- */
+  // Prefer deliveryStatus, then status; provide safe defaults so UI never loses meta row.
+  const effectiveStatus =
+    message.deliveryStatus ||
+    message.status ||
+    (message.isMine ? (message._id ? "sent" : "pending") : "delivered");
+
+  const timeText =
+    message.timestamp ||
+    (message.createdAtISO
+      ? new Date(message.createdAtISO).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : undefined);
 
   /* --------------------------------- render --------------------------------- */
   return (
@@ -413,10 +431,20 @@ export default function MessageBubble({
           {/* Footer: time + delivery checks */}
           <div className={`mt-1 mb-2 text-[10px] flex items-center gap-1.5 ${message.isMine ? "justify-end" : "justify-end"} whitespace-nowrap`}>
             {message.isMine ? (
-              <DeliveryBadge status={message.status} createdAtISO={message.createdAtISO} onRetry={onRetry} />
+              <DeliveryBadge
+                status={effectiveStatus}
+                createdAtISO={message.createdAtISO}
+                timeText={timeText}
+                isMine={true}
+                onRetry={onRetry}
+              />
             ) : (
               <div className={`${message.isMine ? "text-white/70" : "text-black/50"}`}>
-                {new Date(message.createdAtISO || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                {timeText ||
+                  new Date(message.createdAtISO || Date.now()).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
               </div>
             )}
           </div>

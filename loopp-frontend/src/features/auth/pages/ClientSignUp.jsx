@@ -521,10 +521,11 @@ export default function ClientSignUp() {
                         <Sparkles className="w-4 h-4 text-black/70" />
                       </div>
                       <h3 className="mt-2 text-[15px] font-semibold text-gray-900 tracking-tight">
-                        Pick a project before signing up
+                        Select a project to continue
                       </h3>
                       <p className="mt-1.5 text-xs text-gray-600 leading-relaxed">
-                        We couldn’t find a project key. Choose your project to unlock your workspace and PM assignment.
+                        It looks like no project key was found. To complete your signup and unlock your workspace with a dedicated Project Manager, please select a project first. 
+                        In the meantime, you can explore our available services by clicking <span className="font-semibold text-gray-900">“Explore our services”</span> or hire an AI Engineer by selecting <span className="font-semibold text-gray-900">“Hire an AI Engineer”</span>.
                       </p>
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <a
@@ -532,13 +533,13 @@ export default function ClientSignUp() {
                           className="inline-flex items-center gap-2 rounded-xl bg-black text-white text-xs font-semibold px-3.5 py-2 transition hover:-translate-y-0.5 hover:shadow-lg"
                         >
                           <ArrowLeft className="w-4 h-4" />
-                          Go pick a project
+                          Explore our services
                         </a>
                         <Link
-                          to="/client-sign-in"
+                          to="https://angelmap.foundryradar.com/hire-an-engineer/"
                           className="inline-flex items-center gap-2 rounded-xl border border-black/20 bg-white text-gray-900 text-xs font-semibold px-3.5 py-2 transition hover:border-black"
                         >
-                          Or sign in instead
+                          Hire an AI Engineer
                         </Link>
                       </div>
                     </div>

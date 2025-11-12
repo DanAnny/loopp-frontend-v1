@@ -5,9 +5,13 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  description: 'Loopp backend HTTP API.
+  description: |
+    Loopp backend HTTP API.
 
-    '
+    Notes:
+    - Authentication uses **JWT Bearer** for most endpoints.
+    - The refresh flow sets/reads a secure, partitioned cookie at **/api/auth/refresh**.
+    - Chat file uploads are **multipart/form-data**.
 servers:
   - url: http://localhost:5500/api
     description: Local Dev
@@ -16,31 +20,33 @@ servers:
   - url: https://api.loopp.app/api
     description: Production
 security:
-- bearerAuth: []
+  - bearerAuth: []
+
 tags:
-- name: Auth
-  description: Authentication and session flows.
-- name: Projects
-  description: Project request lifecycle and reads.
-- name: Tasks
-  description: Engineer task workflow.
-- name: Chat
-  description: Chat rooms and messaging.
-- name: Users
-  description: User directory and role-restricted lists.
-- name: Dashboard
-  description: Admin/SuperAdmin overview.
-- name: Management
-  description: Administrative management actions.
-- name: Notifications
-  description: Per-user notifications.
-- name: Integrations
-  description: Billing, Zoom and webhooks.
+  - name: Auth
+    description: Authentication and session flows.
+  - name: Projects
+    description: Project request lifecycle and reads.
+  - name: Tasks
+    description: Engineer task workflow.
+  - name: Chat
+    description: Chat rooms and messaging.
+  - name: Users
+    description: User directory and role-restricted lists.
+  - name: Dashboard
+    description: Admin/SuperAdmin overview.
+  - name: Management
+    description: Administrative management actions.
+  - name: Notifications
+    description: Per-user notifications.
+  - name: Integrations
+    description: Billing, Zoom and webhooks.
+
 paths:
+
   /auth/signup-superadmin:
     post:
-      tags:
-      - Auth
+      tags: [Auth]
       summary: Sign up SuperAdmin
       operationId: authSignupSuperadmin
       requestBody:
@@ -48,585 +54,1142 @@ paths:
         content:
           application/json:
             schema:
-              type: object
+              $ref: '#/components/schemas/SuperAdminSignup'
+            examples:
+              create:
+                value:
+                  email: boss@loopp.app
+                  password: StrongP@ssw0rd!
+                  phone: "+2348012345678"
+                  firstName: Ada
+                  lastName: Obi
+                  gender: Female
       responses:
         '201':
           description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthCreateUserResponse'}
+              examples:
+                created:
+                  value:
+                    success: true
+                    message: "User created"
+                    user:
+                      _id: "6757e8c9f1..."
+                      email: "boss@loopp.app"
+                      firstName: "Ada"
+                      lastName: "Obi"
+                      phone: "+2348012345678"
+                      gender: "Female"
+                      role: "SuperAdmin"
         '400':
           description: Bad request
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                missing:
+                  value: { success: false, message: "email is required" }
+
   /auth/customer/signup:
     post:
-      tags:
-      - Auth
+      tags: [Auth]
       summary: Public client signup
       operationId: authCustomerSignup
+      description: Creates a **Client** role and returns access token + user. Also sets a refresh cookie scoped to `/api/auth/refresh`.
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
+            schema: {$ref: '#/components/schemas/PublicSignup'}
+            examples:
+              ok:
+                value:
+                  email: client@example.com
+                  password: "P@ssw0rd!"
+                  phone: "+2348012345678"
+                  firstName: Chidi
+                  lastName: Okafor
+                  gender: Male
       responses:
         '201':
-          description: Created
+          description: Created (access token + user; refresh cookie set)
+          headers:
+            Set-Cookie:
+              description: Secure, httpOnly `refreshToken` cookie for `/api/auth/refresh`
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthSigninResponse'}
+              examples:
+                created:
+                  value:
+                    success: true
+                    accessToken: "eyJhbGciOi..."
+                    user:
+                      _id: "6757e8c9f1..."
+                      email: "client@example.com"
+                      firstName: "Chidi"
+                      lastName: "Okafor"
+                      phone: "+2348012345678"
+                      gender: "Male"
+                      role: "Client"
         '400':
-          description: Bad request
+          description: Missing fields or invalid input
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                exists:
+                  value: { success: false, message: "Email already in use" }
+
   /auth/add-user:
     post:
-      tags:
-      - Auth
+      tags: [Auth]
       summary: Add user (Admin/SuperAdmin)
       operationId: authAddUser
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AddUser'}
+            examples:
+              engineer:
+                value:
+                  email: engineer@loopp.app
+                  role: Engineer
+                  phone: "+2348099999999"
+                  firstName: Mayowa
+                  lastName: Bello
+                  gender: Male
       responses:
         '201':
           description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthCreateUserResponse'}
+              examples:
+                created:
+                  value:
+                    success: true
+                    message: "User created"
+                    user:
+                      _id: "674db2af9e..."
+                      email: "engineer@loopp.app"
+                      firstName: "Mayowa"
+                      lastName: "Bello"
+                      role: "Engineer"
         '400':
           description: Bad request
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                invalid:
+                  value: { success: false, message: "role is invalid" }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /auth/signin:
     post:
-      tags:
-      - Auth
+      tags: [Auth]
       summary: Sign in
       operationId: authSignin
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
+            schema: {$ref: '#/components/schemas/Signin'}
+            examples:
+              ok:
+                value: { email: client@example.com, password: "P@ssw0rd!" }
       responses:
         '200':
           description: Authenticated
           headers:
             Set-Cookie:
-              description: Optional auth cookie
-              schema:
-                type: string
+              description: Optional `refreshToken` cookie (secure, httpOnly) bound to `/api/auth/refresh`
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthSigninResponse'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    accessToken: "eyJhbGciOi..."
+                    user:
+                      _id: "6757e8c9f1..."
+                      email: "client@example.com"
+                      firstName: "Chidi"
+                      lastName: "Okafor"
+                      role: "Client"
         '400':
           description: Bad request
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                missing:
+                  value: { success: false, message: "email and password are required" }
         '401':
           description: Invalid credentials
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                bad:
+                  value: { success: false, message: "Invalid email or password" }
+
   /auth/refresh:
     post:
-      tags:
-      - Auth
+      tags: [Auth]
       summary: Refresh token
       operationId: authRefresh
       responses:
         '200':
-          description: OK
+          description: OK (new access token)
+          headers:
+            Set-Cookie:
+              description: Rotated `refreshToken` cookie (secure, httpOnly) bound to `/api/auth/refresh`
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  accessToken: {type: string}
+              examples:
+                ok:
+                  value: { success: true, accessToken: "eyJhbGciOi..." }
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                no_cookie:
+                  value: { success: false, message: "No refresh token" }
+
   /auth/logout:
     post:
-      tags:
-      - Auth
+      tags: [Auth]
       summary: Logout
       operationId: authLogout
       responses:
-        '204':
-          description: No Content
+        '204': { description: No Content }
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                no_auth:
+                  value: { success: false, message: "Unauthorized" }
+
   /projects/intake:
     post:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: Intake from WordPress
       operationId: projectsIntakeFromWordPress
-      responses:
-        '200':
-          description: OK
-        '400':
-          description: Bad request
-  /projects/client/create:
-    post:
-      tags:
-      - Projects
-      summary: Client creates project
-      operationId: projectsClientCreate
-      security:
-      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/WPIntake'}
+            examples:
+              ok:
+                value:
+                  firstName: Jane
+                  lastName: Doe
+                  email: jane@client.com
+                  projectTitle: "Landing page redesign"
+                  projectDescription: "Refresh hero, add pricing, optimize lighthouse."
+                  completionDate: "2025-11-20"
+                  clientKey: "abc123-public-key"
       responses:
         '201':
           description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IntakeCreated'}
+              examples:
+                created:
+                  value:
+                    success: true
+                    requestId: "6757e8c9f1..."
+                    chatRoomId: "674db2af9e..."
+                    roomKey: "RM-123-KEY"
+                    clientKey: "abc123-public-key"
         '400':
           description: Bad request
-        '401':
-          description: Unauthorized
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                missing:
+                  value: { success: false, message: "email is required" }
+
+  /projects/client/create:
+    post:
+      tags: [Projects]
+      summary: Client creates project
+      operationId: projectsClientCreate
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ClientCreateProject'}
+            examples:
+              ok:
+                value:
+                  clientKey: "abc123"
+                  projectTitle: "Mobile app MVP"
+                  firstName: "Jane"
+                  lastName: "Doe"
+                  email: "jane@client.com"
+                  projectDescription: "React Native MVP for booking"
+                  completionDate: "2025-12-01"
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  requestId: {type: string}
+                  chatRoomId: {type: string, nullable: true}
+                  clientKey: {type: string}
+              examples:
+                created:
+                  value:
+                    success: true
+                    requestId: "6757e8c9f1..."
+                    chatRoomId: "674db2af9e..."
+                    clientKey: "abc123"
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                invalid:
+                  value: { success: false, message: "completionDate is invalid" }
+        '401': { description: Unauthorized }
+
   /projects/client/request-reopen:
     post:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: Client requests reopen
       operationId: projectsClientRequestReopen
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                roomId: {type: string}
+                requestId: {type: string}
+            examples:
+              byRoom:
+                value: { roomId: "674db2af9e..." }
+              byRequest:
+                value: { requestId: "6757e8c9f1..." }
       responses:
         '200':
           description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReopenResponse'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    message: "Reopen request submitted"
+                    room: { id: "674db2af9e...", isClosed: true, reopenRequestedByClient: true }
+                    project: { id: "6757e8c9f1...", status: "completed" }
         '400':
           description: Bad request
-        '401':
-          description: Unauthorized
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                none:
+                  value: { success: false, message: "roomId or requestId is required" }
+        '401': { description: Unauthorized }
+
   /projects/public/by-key/{clientKey}:
     get:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: Public read by clientKey
       operationId: projectsPublicByKey
       parameters:
-      - in: path
-        name: clientKey
-        required: true
-        schema:
-          type: string
+        - in: path
+          name: clientKey
+          required: true
+          schema: {type: string}
       responses:
         '200':
           description: OK
-        '404':
-          description: Not Found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicProjectByKey'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    project:
+                      id: "6757e8c9f1..."
+                      firstName: "Jane"
+                      lastName: "Doe"
+                      email: "jane@client.com"
+                      title: "Mobile app MVP"
+                      status: "in-progress"
+                    chatRoom:
+                      id: "674db2af9e..."
+                      title: "Jane Doe — Mobile app MVP"
+                      isClosed: false
+                      roomKey: "RM-123-KEY"
+                      reopenRequestedByClient: false
+        '404': { description: Not Found }
+
   /projects:
     get:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: List projects (PM/Admin)
       operationId: projectsList
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       responses:
         '200':
           description: OK
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  projects:
+                    type: array
+                    items: {$ref: '#/components/schemas/ProjectSummary'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    projects:
+                      - _id: "6757e8c9f1..."
+                        projectTitle: "Landing page redesign"
+                        status: "in-progress"
+                        taskDeadline: "2025-11-20"
+                        taskStatus: "assigned"
+                        taskUpdatedAt: "2025-11-10T16:15:00.000Z"
+                        updatedAt: "2025-11-10T16:00:00.000Z"
+                      - _id: "6757e8c9f2..."
+                        projectTitle: "Mobile app MVP"
+                        status: "completed"
+                        updatedAt: "2025-11-08T10:00:00.000Z"
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /projects/overview:
     get:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: Overview (PM/Admin)
       operationId: projectsOverview
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       responses:
         '200':
-          description: OK
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          description: OK (thisMonth counts)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  thisMonth:
+                    type: object
+                    properties:
+                      projects: {type: integer}
+                      completed: {type: integer}
+              examples:
+                ok:
+                  value: { success: true, thisMonth: { projects: 12, completed: 8 } }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /projects/{id}:
     get:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: Get project by id (PM/Admin)
       operationId: projectsGetById
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          type: string
+        - in: path
+          name: id
+          required: true
+          schema: {type: string}
       responses:
         '200':
           description: OK
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
-        '404':
-          description: Not Found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectWithTasks'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    project:
+                      _id: "6757e8c9f1..."
+                      status: "in-progress"
+                      taskDeadline: "2025-11-20"
+                      taskStatus: "assigned"
+                      taskUpdatedAt: "2025-11-10T16:15:00.000Z"
+                      reopenRequested: false
+                    tasks:
+                      - _id: "tsk_1"
+                        title: "Implement webhook"
+                        status: "assigned"
+                      - _id: "tsk_2"
+                        title: "QA payment flow"
+                        status: "todo"
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+        '404': { description: Not Found }
+
   /projects/by-room/{roomId}:
     get:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: Get by room (PM/Admin)
       operationId: projectsGetByRoom
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       parameters:
-      - in: path
-        name: roomId
-        required: true
-        schema:
-          type: string
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
       responses:
         '200':
           description: OK
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
-        '404':
-          description: Not Found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectBasic'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    project:
+                      _id: "6757e8c9f1..."
+                      status: "in-progress"
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+        '404': { description: Not Found }
+
   /projects/by-room/{roomId}/named:
     get:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: Get by room (named response)
       operationId: projectsGetByRoomNamed
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       parameters:
-      - in: path
-        name: roomId
-        required: true
-        schema:
-          type: string
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
       responses:
         '200':
-          description: OK
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
-        '404':
-          description: Not Found
+          description: OK (with pm/engineer names & reopen flag)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectNamed'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    project:
+                      _id: "6757e8c9f1..."
+                      status: "in-progress"
+                      pmAssigned: "674pm..."
+                      engineerAssigned: "674eng..."
+                      pmName: "Ada Obi"
+                      engineerName: "Mayowa Bello"
+                      taskDeadline: "2025-11-20"
+                      taskStatus: "assigned"
+                      taskUpdatedAt: "2025-11-10T16:15:00.000Z"
+                      reopenRequested: false
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+        '404': { description: Not Found }
+
   /projects/by-room/{roomId}/meta:
     get:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: Get minimal public room meta
       operationId: projectsGetRoomMeta
       parameters:
-      - in: path
-        name: roomId
-        required: true
-        schema:
-          type: string
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
       responses:
         '200':
           description: OK
-        '404':
-          description: Not Found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicRoomMeta'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    room: { id: "674db2af9e...", isClosed: false, reopenRequestedByClient: false }
+                    project: { id: "6757e8c9f1...", status: "in-progress", hasRatings: false }
+        '404': { description: Not Found }
+
   /projects/assign-engineer:
     post:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: Assign engineer (PM)
       operationId: projectsAssignEngineer
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AssignEngineer'}
+            examples:
+              ok:
+                value: { requestId: "6757e8c9f1...", engineerId: "674eng..." }
       responses:
         '200':
           description: OK
-        '400':
-          description: Bad request
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
-        '409':
-          description: Conflict
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectBasic'}
+              examples:
+                ok:
+                  value: { success: true, project: { _id: "6757e8c9f1...", status: "in-progress" } }
+        '400': { description: Bad request }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+        '409': { description: Conflict }
+
   /projects/engineer/accept:
     post:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: Engineer accepts request
       operationId: projectsEngineerAccept
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EngineerAccept'}
+            examples:
+              ok:
+                value: { requestId: "6757e8c9f1..." }
       responses:
         '200':
           description: OK
-        '400':
-          description: Bad request
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema: {type: object, properties: {success: {type: boolean}}}
+              examples:
+                ok:
+                  value: { success: true }
+        '400': { description: Bad request }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /projects/review:
     post:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: Engineer marks request in review
       operationId: projectsEngineerMarkReview
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EngineerReview'}
+            examples:
+              ok:
+                value: { requestId: "6757e8c9f1..." }
       responses:
         '200':
           description: OK
-        '400':
-          description: Bad request
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema: {type: object, properties: {success: {type: boolean}}}
+              examples:
+                ok:
+                  value: { success: true }
+        '400': { description: Bad request }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /projects/rate:
     post:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: Client rates request
       operationId: projectsRate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RateRequest'}
+            examples:
+              ok:
+                value:
+                  requestId: "6757e8c9f1..."
+                  pmScore: 5
+                  pmComment: "Very helpful"
+                  engineerScore: 4
+                  engineerComment: "Great work"
+                  coordinationScore: 5
+                  coordinationComment: "Smooth process"
       responses:
         '200':
           description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {success: {type: boolean}}}
+              examples:
+                ok:
+                  value: { success: true }
         '400':
           description: Bad request
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                invalid:
+                  value: { success: false, message: "scores must be 1..5" }
+
   /projects/close:
     post:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: PM closes request
       operationId: projectsClose
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {requestId: {type: string}}}
+            examples:
+              ok:
+                value: { requestId: "6757e8c9f1..." }
       responses:
         '200':
           description: OK
-        '400':
-          description: Bad request
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema: {type: object, properties: {success: {type: boolean}}}
+              examples:
+                ok:
+                  value: { success: true }
+        '400': { description: Bad request }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /projects/reopen:
     post:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: PM reopens request
       operationId: projectsReopen
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {requestId: {type: string}}}
+            examples:
+              ok:
+                value: { requestId: "6757e8c9f1..." }
       responses:
         '200':
           description: OK
-        '400':
-          description: Bad request
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema: {type: object, properties: {success: {type: boolean}}}
+              examples:
+                ok:
+                  value: { success: true }
+        '400': { description: Bad request }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /projects/named:
     get:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: List projects (named)
       operationId: projectsListNamed
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       responses:
         '200':
-          description: OK
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          description: OK (with pm/engineer names, task rollups, reopen flags)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  projects:
+                    type: array
+                    items: {$ref: '#/components/schemas/ProjectNamedItem'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    projects:
+                      - _id: "6757e8c9f1..."
+                        status: "in-progress"
+                        pmName: "Ada Obi"
+                        engineerName: "Mayowa Bello"
+                        taskStatus: "assigned"
+                        reopenRequested: false
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /projects/{id}/named:
     get:
-      tags:
-      - Projects
+      tags: [Projects]
       summary: Get project by id (named)
       operationId: projectsGetByIdNamed
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          type: string
+        - in: path
+          name: id
+          required: true
+          schema: {type: string}
       responses:
         '200':
           description: OK
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
-        '404':
-          description: Not Found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectNamed'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    project:
+                      _id: "6757e8c9f1..."
+                      status: "in-progress"
+                      pmName: "Ada Obi"
+                      engineerName: "Mayowa Bello"
+                      taskStatus: "assigned"
+                      reopenRequested: false
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+        '404': { description: Not Found }
+
   /tasks/create:
     post:
-      tags:
-      - Tasks
+      tags: [Tasks]
       summary: Create task (PM)
       operationId: tasksCreate
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateTask'}
+            examples:
+              ok:
+                value:
+                  requestId: "6757e8c9f1..."
+                  engineerId: "674db2af9e..."
+                  title: "Wire the payment webhook"
+                  description: "Implement Stripe webhook + retries"
+                  deadline: "2025-11-18T17:00:00.000Z"
+                  pmDeadline: "2025-11-17T17:00:00.000Z"
       responses:
         '201':
           description: Created
-        '400':
-          description: Bad request
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TaskCreated'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    task:
+                      _id: "tsk_1"
+                      title: "Wire the payment webhook"
+                      status: "assigned"
+        '400': { description: Bad request }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /tasks/accept:
     post:
-      tags:
-      - Tasks
+      tags: [Tasks]
       summary: Accept task (Engineer)
       operationId: tasksAccept
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { taskId: {type: string} }
+            examples:
+              ok:
+                value: { taskId: "tsk_1" }
       responses:
         '200':
-          description: OK
-        '400':
-          description: Bad request
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          description: OK (task accepted + room hints)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  task: {$ref: '#/components/schemas/Task'}
+                  roomId: {type: string, nullable: true}
+                  roomKey: {type: string, nullable: true}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    task: { _id: "tsk_1", status: "in-progress" }
+                    roomId: "674db2af9e..."
+                    roomKey: "RM-123-KEY"
+        '400': { description: Bad request }
+        '401': { description: Unauthorized }
+
   /tasks/complete:
     post:
-      tags:
-      - Tasks
+      tags: [Tasks]
       summary: Complete task (Engineer)
       operationId: tasksComplete
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { taskId: {type: string} }
+            examples:
+              ok:
+                value: { taskId: "tsk_1" }
       responses:
         '200':
           description: OK
-        '400':
-          description: Bad request
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TaskCompleted'}
+              examples:
+                ok:
+                  value: { success: true, task: { _id: "tsk_1", status: "completed" } }
+        '400': { description: Bad request }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /tasks/engineer/{engineerId}:
     get:
-      tags:
-      - Tasks
+      tags: [Tasks]
       summary: List engineer tasks
       operationId: tasksListByEngineer
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       parameters:
-      - in: path
-        name: engineerId
-        required: true
-        schema:
-          type: string
+        - in: path
+          name: engineerId
+          required: true
+          schema: {type: string}
       responses:
         '200':
           description: OK
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  tasks:
+                    type: array
+                    items: {$ref: '#/components/schemas/Task'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    tasks:
+                      - { _id: "tsk_1", title: "Webhook", status: "in-progress" }
+                      - { _id: "tsk_2", title: "QA", status: "todo" }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /tasks/engineer/{engineerId}/summary:
     get:
-      tags:
-      - Tasks
+      tags: [Tasks]
       summary: Engineer task summary
       operationId: tasksSummaryByEngineer
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       parameters:
-      - in: path
-        name: engineerId
-        required: true
-        schema:
-          type: string
+        - in: path
+          name: engineerId
+          required: true
+          schema: {type: string}
       responses:
         '200':
           description: OK
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  summary:
+                    type: object
+                    additionalProperties: true
+              examples:
+                ok:
+                  value: { success: true, summary: { total: 8, completed: 5, inProgress: 2, todo: 1 } }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /chat/send:
     post:
-      tags:
-      - Chat
+      tags: [Chat]
       summary: Staff send message (multipart)
       operationId: chatSend
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
+              required: [roomId]
               properties:
                 files:
                   type: array
-                  items:
-                    type: string
-                    format: binary
-                roomId:
-                  type: string
-                text:
-                  type: string
+                  items: {type: string, format: binary}
+                roomId: {type: string}
+                text: {type: string}
+            encoding:
+              files:
+                style: form
+                explode: true
       responses:
         '201':
           description: Sent
-        '400':
-          description: Bad request
-        '401':
-          description: Unauthorized
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChatMessageResponse'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    message:
+                      _id: "msg_1"
+                      room: "674db2af9e..."
+                      sender: "674pm..."
+                      senderType: "User"
+                      senderRole: "PM"
+                      senderName: "Ada Obi"
+                      text: "Pushing the latest fix."
+                      attachments: []
+                      createdAt: "2025-11-10T15:55:00.000Z"
+                      createdAtISO: "2025-11-10T15:55:00.000Z"
+                      visibleTo: "All"
+        '400': { description: Bad request }
+        '401': { description: Unauthorized }
+
   /chat/{roomId}/messages:
     get:
-      tags:
-      - Chat
+      tags: [Chat]
       summary: Get messages by room (staff)
       operationId: chatGetMessages
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       parameters:
-      - in: path
-        name: roomId
-        required: true
-        schema:
-          type: string
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
+        - in: query
+          name: limit
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+        - in: query
+          name: cursor
+          schema: {type: string}
       responses:
         '200':
           description: OK
-        '401':
-          description: Unauthorized
-        '404':
-          description: Not Found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChatMessages'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    messages:
+                      - { _id: "msg_2", text: "Welcome!", createdAtISO: "2025-11-10T09:00:00.000Z" }
+                      - { _id: "msg_3", text: "Sharing draft now.", createdAtISO: "2025-11-10T10:00:00.000Z" }
+        '401': { description: Unauthorized }
+        '404': { description: Not Found }
+
   /chat/my-rooms:
     get:
-      tags:
-      - Chat
+      tags: [Chat]
       summary: List my rooms (staff)
       operationId: chatMyRooms
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       responses:
         '200':
           description: OK
-        '401':
-          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  rooms:
+                    type: array
+                    items: {$ref: '#/components/schemas/ChatRoom'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    rooms:
+                      - success: true
+                        room: { _id: "674db2af9e...", title: "Jane — MVP", roomKey: "RM-123-KEY", isClosed: false }
+        '401': { description: Unauthorized }
+
   /chat/room/key/{key}:
     get:
-      tags:
-      - Chat
+      tags: [Chat]
       summary: Get room by key (staff)
       operationId: chatGetRoomByKey
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       parameters:
-      - in: path
-        name: key
-        required: true
-        schema:
-          type: string
+        - in: path
+          name: key
+          required: true
+          schema: {type: string}
       responses:
         '200':
           description: OK
-        '401':
-          description: Unauthorized
-        '404':
-          description: Not Found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChatRoom'}
+              examples:
+                ok:
+                  value: { success: true, room: { _id: "674db2af9e...", title: "Jane — MVP", roomKey: "RM-123-KEY" } }
+        '401': { description: Unauthorized }
+        '404': { description: Not Found }
+
   /chat/client/send:
     post:
-      tags:
-      - Chat
+      tags: [Chat]
       summary: Public client-key send message (multipart)
       operationId: chatClientSend
       requestBody:
@@ -635,332 +1198,978 @@ paths:
           multipart/form-data:
             schema:
               type: object
+              required: [requestId]
               properties:
                 files:
                   type: array
-                  items:
-                    type: string
-                    format: binary
-                key:
-                  type: string
-                text:
-                  type: string
+                  items: {type: string, format: binary}
+                requestId: {type: string}
+                clientKey: {type: string}
+                text: {type: string}
       responses:
         '201':
           description: Sent
-        '400':
-          description: Bad request
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChatMessageResponse'}
+              examples:
+                ok:
+                  value: { success: true, message: { _id: "msg_10", text: "Client update attached." } }
+        '400': { description: Bad request }
+
   /chat/client/{requestId}/messages:
     get:
-      tags:
-      - Chat
+      tags: [Chat]
       summary: Public client-key messages
       operationId: chatClientGetMessages
       parameters:
-      - in: path
-        name: requestId
-        required: true
-        schema:
-          type: string
+        - in: path
+          name: requestId
+          required: true
+          schema: {type: string}
+        - in: query
+          name: clientKey
+          schema: {type: string}
+        - in: query
+          name: limit
+          schema: {type: integer, minimum: 1, maximum: 200, default: 100}
+        - in: query
+          name: cursor
+          schema: {type: string}
       responses:
         '200':
-          description: OK
-        '404':
-          description: Not Found
+          description: OK (messages + nextCursor)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicChatMessages'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    messages:
+                      - { _id: "msg_11", text: "Hello from client" }
+                    nextCursor: null
+        '404': { description: Not Found }
+
   /chat/my-client-rooms:
     get:
-      tags:
-      - Chat
+      tags: [Chat]
       summary: Client-auth rooms
       operationId: chatMyClientRooms
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       responses:
         '200':
-          description: OK
-        '401':
-          description: Unauthorized
+          description: OK (auto-heals membership if missing)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  rooms:
+                    type: array
+                    items: {$ref: '#/components/schemas/MyClientRoom'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    rooms:
+                      - { id: "674db2af9e...", title: "Jane — MVP", hasRoom: true, isClosed: false, requestId: "6757e8c9f1...", clientKey: "abc123" }
+        '401': { description: Unauthorized }
+
   /chat/client-room/{roomId}/messages:
     get:
-      tags:
-      - Chat
+      tags: [Chat]
       summary: Client-auth room messages
       operationId: chatClientRoomMessages
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       parameters:
-      - in: path
-        name: roomId
-        required: true
-        schema:
-          type: string
+        - in: path
+          name: roomId
+          required: true
+          schema: {type: string}
       responses:
         '200':
           description: OK
-        '401':
-          description: Unauthorized
-        '404':
-          description: Not Found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChatMessages'}
+              examples:
+                ok:
+                  value: { success: true, messages: [ { _id: "msg_12", text: "Auth client message" } ] }
+        '401': { description: Unauthorized }
+        '404': { description: Not Found }
+
   /chat/client-room/send:
     post:
-      tags:
-      - Chat
+      tags: [Chat]
       summary: Client-auth send message (multipart)
       operationId: chatClientRoomSend
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
+              required: [roomId]
               properties:
                 files:
                   type: array
-                  items:
-                    type: string
-                    format: binary
-                roomId:
-                  type: string
-                text:
-                  type: string
+                  items: {type: string, format: binary}
+                roomId: {type: string}
+                text: {type: string}
       responses:
         '201':
           description: Sent
-        '400':
-          description: Bad request
-        '401':
-          description: Unauthorized
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChatMessageResponse'}
+              examples:
+                ok:
+                  value: { success: true, message: { _id: "msg_13", text: "Auth client upload" } }
+        '400': { description: Bad request }
+        '401': { description: Unauthorized }
+
   /users/engineers:
     get:
-      tags:
-      - Users
+      tags: [Users]
       summary: List engineers (PM/Admin/SuperAdmin)
       operationId: usersGetEngineers
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: isBusy
+          schema: {type: boolean}
       responses:
         '200':
           description: OK
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  engineers:
+                    type: array
+                    items: {$ref: '#/components/schemas/User'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    engineers:
+                      - { _id: "674eng...", email: "eng@loopp.app", firstName: "Mayowa", lastName: "Bello", role: "Engineer", isBusy: false }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /users/pms:
     get:
-      tags:
-      - Users
+      tags: [Users]
       summary: List PMs (Admin/SuperAdmin)
       operationId: usersGetPMs
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: isBusy
+          schema: {type: boolean}
       responses:
         '200':
           description: OK
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  pms:
+                    type: array
+                    items: {$ref: '#/components/schemas/User'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    pms:
+                      - { _id: "674pm...", email: "pm@loopp.app", firstName: "Ada", lastName: "Obi", role: "PM", isBusy: true }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /users:
     get:
-      tags:
-      - Users
+      tags: [Users]
       summary: List users (PM/Admin/SuperAdmin)
       operationId: usersGetAll
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       responses:
         '200':
           description: OK
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  users:
+                    type: array
+                    items: {$ref: '#/components/schemas/User'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    users:
+                      - { _id: "674pm...", email: "pm@loopp.app", role: "PM" }
+                      - { _id: "674eng...", email: "eng@loopp.app", role: "Engineer" }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /dashboard/overview:
     get:
-      tags:
-      - Dashboard
+      tags: [Dashboard]
       summary: Admin dashboard overview
       operationId: dashboardOverview
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: range
+          schema: {type: string, enum: [day, week, month], default: month}
       responses:
         '200':
           description: OK
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data:
+                    type: object
+                    additionalProperties: true
+              examples:
+                ok:
+                  value: { success: true, data: { users: 120, active: 43, projects: 28 } }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /management/overview:
     get:
-      tags:
-      - Management
+      tags: [Management]
       summary: Management overview
       operationId: managementOverview
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       responses:
         '200':
-          description: OK
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          description: OK (staff counts, project health, top busy)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ManagementOverview'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    data:
+                      staff: { total: 12, pms: 3, engs: 7, admins: 2, pmActive: 2, pmIdle: 1, engActive: 5, engIdle: 2 }
+                      projects: { open: 6, inProgress: 10, completed: 12 }
+                      topBusy:
+                        - { firstName: "Mayowa", lastName: "Bello", role: "Engineer", numberOfTask: 5, isBusy: true, online: true }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /management/audits:
     get:
-      tags:
-      - Management
+      tags: [Management]
       summary: Recent audits
       operationId: managementAudits
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
       responses:
         '200':
           description: OK
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  audits:
+                    type: array
+                    items: {type: object, additionalProperties: true}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    audits:
+                      - { id: "a1", actor: "674pm...", action: "ASSIGN_ENGINEER", at: "2025-11-10T14:00:00.000Z", meta: { requestId: "6757e8c9f1..." } }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /management/users/bulk:
     patch:
-      tags:
-      - Management
+      tags: [Management]
       summary: Bulk update users
       operationId: managementBulkUpdateUsers
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
+            schema: {$ref: '#/components/schemas/BulkUpdateUsers'}
+            examples:
+              set-online-and-role:
+                value:
+                  ids: ["674db2af9e...", "674db2af9f..."]
+                  patch:
+                    online: true
+                    isBusy: false
+                    isActive: true
+                    role: Engineer
       responses:
         '200':
-          description: OK
-        '400':
-          description: Bad request
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          description: OK (changed count)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  changed: {type: integer}
+              examples:
+                ok:
+                  value: { success: true, changed: 2 }
+        '400': { description: Bad request }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /management/users/{id}/toggle:
     patch:
-      tags:
-      - Management
+      tags: [Management]
       summary: Quick toggle user
       operationId: managementQuickToggleUser
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       parameters:
-      - in: path
-        name: id
+        - in: path
+          name: id
+          required: true
+          schema: {type: string}
+      requestBody:
         required: true
-        schema:
-          type: string
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ToggleUser'}
+            examples:
+              ok:
+                value: { isBusy: true, online: true, isActive: true }
       responses:
         '200':
           description: OK
-        '400':
-          description: Bad request
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema: {type: object, properties: {success: {type: boolean}}}
+              examples:
+                ok:
+                  value: { success: true }
+        '400': { description: Bad request }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /notifications:
     get:
-      tags:
-      - Notifications
+      tags: [Notifications]
       summary: List my notifications
       operationId: notificationsList
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - in: query
+          name: cursor
+          schema: {type: string, description: "Pagination cursor (id < cursor)"}
       responses:
         '200':
-          description: OK
-        '401':
-          description: Unauthorized
+          description: OK (notifications + nextCursor)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NotificationsPage'}
+              examples:
+                ok:
+                  value:
+                    success: true
+                    notifications:
+                      - { _id: "n1", type: "TASK_ASSIGNED", title: "Task assigned", body: "You have a new task", createdAt: "2025-11-10T12:00:00.000Z", readAt: null }
+                    nextCursor: null
+        '401': { description: Unauthorized }
+
   /notifications/read:
     post:
-      tags:
-      - Notifications
+      tags: [Notifications]
       summary: Mark notification read
       operationId: notificationsMarkRead
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {id: {type: string}}}
+            examples:
+              ok:
+                value: { id: "n1" }
       responses:
         '200':
-          description: OK
-        '400':
-          description: Bad request
-        '401':
-          description: Unauthorized
+          description: OK (returns updated item)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  notification:
+                    type: object
+                    properties:
+                      _id: {type: string}
+                      readAt: {type: string, format: date-time}
+              examples:
+                ok:
+                  value: { success: true, notification: { _id: "n1", readAt: "2025-11-10T16:20:00.000Z" } }
+        '400': { description: Bad request }
+        '401': { description: Unauthorized }
+
   /notifications/read-all:
     post:
-      tags:
-      - Notifications
+      tags: [Notifications]
       summary: Mark all notifications read
       operationId: notificationsMarkAllRead
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       responses:
         '200':
           description: OK
-        '401':
-          description: Unauthorized
+          content:
+            application/json:
+              schema: {type: object, properties: {success: {type: boolean}}}
+              examples:
+                ok:
+                  value: { success: true }
+        '401': { description: Unauthorized }
+
   /integrations/billing/invoices:
     post:
-      tags:
-      - Integrations
+      tags: [Integrations]
       summary: Create hosted invoice (Stripe)
       operationId: integrationsCreateHostedInvoice
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
+            examples:
+              ok:
+                value:
+                  customerId: "cus_123"
+                  amount: 4999
+                  currency: "usd"
+                  description: "Loopp Pro — Nov 2025"
       responses:
         '200':
           description: OK
-        '400':
-          description: Bad request
-        '401':
-          description: Unauthorized
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+              examples:
+                ok:
+                  value: { url: "https://billing.stripe.com/i/session_123", invoiceId: "in_123" }
+        '400': { description: Bad request }
+        '401': { description: Unauthorized }
+
   /integrations/zoom/meetings:
     post:
-      tags:
-      - Integrations
+      tags: [Integrations]
       summary: Create Zoom meeting (PM only)
       operationId: integrationsCreateZoomMeeting
-      security:
-      - bearerAuth: []
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
+            examples:
+              ok:
+                value:
+                  topic: "Loopp — Sprint Review"
+                  start_time: "2025-11-11T10:00:00Z"
+                  duration: 45
       responses:
         '200':
           description: OK
-        '400':
-          description: Bad request
-        '401':
-          description: Unauthorized
-        '403':
-          description: Forbidden
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+              examples:
+                ok:
+                  value: { join_url: "https://zoom.us/j/123", id: "9876543210" }
+        '400': { description: Bad request }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+
   /integrations/stripe/webhook:
     post:
-      tags:
-      - Integrations
+      tags: [Integrations]
       summary: Stripe webhook (raw body)
       operationId: integrationsStripeWebhook
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
+            schema: {type: object, additionalProperties: true}
+            examples:
+              invoice_paid:
+                value:
+                  id: "evt_1"
+                  type: "invoice.paid"
+                  data: { object: { id: "in_123", customer: "cus_123" } }
       responses:
         '200':
           description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {received: {type: boolean}}}
+              examples:
+                ok:
+                  value: { received: true }
         '400':
           description: Bad signature
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                bad:
+                  value: { success: false, message: "Webhook signature verification failed" }
+
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        success: {type: boolean, example: false}
+        message: {type: string, example: "Bad request"}
+
+    User:
+      type: object
+      properties:
+        _id: {type: string}
+        email: {type: string}
+        firstName: {type: string}
+        lastName: {type: string}
+        phone: {type: string}
+        gender: {type: string}
+        role: {type: string, enum: [Client, PM, Engineer, Admin, SuperAdmin]}
+        online: {type: boolean, nullable: true}
+        isBusy: {type: boolean, nullable: true}
+
+    AuthCreateUserResponse:
+      type: object
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        user: {$ref: '#/components/schemas/User'}
+
+    AuthSigninResponse:
+      type: object
+      properties:
+        success: {type: boolean}
+        accessToken: {type: string}
+        user: {$ref: '#/components/schemas/User'}
+
+    SuperAdminSignup:
+      type: object
+      required: [email, password, phone, firstName, lastName, gender]
+      properties:
+        email: {type: string, format: email}
+        password: {type: string, minLength: 8}
+        phone: {type: string}
+        firstName: {type: string}
+        lastName: {type: string}
+        gender: {type: string}
+
+    PublicSignup:
+      allOf:
+        - $ref: '#/components/schemas/SuperAdminSignup'
+
+    AddUser:
+      type: object
+      required: [email, role, phone, firstName, lastName, gender]
+      properties:
+        email: {type: string, format: email}
+        role: {type: string, enum: [PM, Engineer, Admin]}
+        phone: {type: string}
+        firstName: {type: string}
+        lastName: {type: string}
+        gender: {type: string}
+
+    Signin:
+      type: object
+      required: [email, password]
+      properties:
+        email: {type: string, format: email}
+        password: {type: string}
+
+    WPIntake:
+      type: object
+      required: [firstName, lastName, email, projectDescription, completionDate]
+      properties:
+        firstName: {type: string}
+        lastName: {type: string}
+        email: {type: string}
+        projectTitle: {type: string}
+        projectDescription: {type: string}
+        completionDate: {type: string}
+        clientKey: {type: string}
+
+    IntakeCreated:
+      type: object
+      properties:
+        success: {type: boolean}
+        requestId: {type: string}
+        chatRoomId: {type: string, nullable: true}
+        roomKey: {type: string, nullable: true}
+        clientKey: {type: string}
+
+    ClientCreateProject:
+      allOf:
+        - $ref: '#/components/schemas/WPIntake'
+      required: [clientKey, firstName, lastName, email, projectDescription, completionDate]
+
+    AssignEngineer:
+      type: object
+      required: [requestId, engineerId]
+      properties:
+        requestId: {type: string}
+        engineerId: {type: string}
+
+    EngineerAccept:
+      type: object
+      required: [requestId]
+      properties:
+        requestId: {type: string}
+
+    EngineerReview:
+      type: object
+      required: [requestId]
+      properties:
+        requestId: {type: string}
+
+    RateRequest:
+      type: object
+      required: [requestId]
+      properties:
+        requestId: {type: string}
+        pmScore: {type: integer, minimum: 1, maximum: 5}
+        pmComment: {type: string}
+        engineerScore: {type: integer, minimum: 1, maximum: 5}
+        engineerComment: {type: string}
+        coordinationScore: {type: integer, minimum: 1, maximum: 5}
+        coordinationComment: {type: string}
+
+    ProjectSummary:
+      type: object
+      properties:
+        _id: {type: string}
+        projectTitle: {type: string}
+        status: {type: string}
+        taskDeadline: {type: string, nullable: true}
+        taskStatus: {type: string, nullable: true}
+        taskUpdatedAt: {type: string, format: date-time, nullable: true}
+        updatedAt: {type: string, format: date-time}
+
+    ProjectBasic:
+      type: object
+      properties:
+        success: {type: boolean}
+        project:
+          type: object
+          additionalProperties: true
+
+    ProjectWithTasks:
+      type: object
+      properties:
+        success: {type: boolean}
+        project:
+          type: object
+          properties:
+            _id: {type: string}
+            status: {type: string}
+            taskDeadline: {type: string, nullable: true}
+            taskStatus: {type: string, nullable: true}
+            taskUpdatedAt: {type: string, format: date-time, nullable: true}
+            reopenRequested: {type: boolean}
+        tasks:
+          type: array
+          items: {type: object, additionalProperties: true}
+
+    ProjectNamedItem:
+      type: object
+      properties:
+        _id: {type: string}
+        status: {type: string}
+        pmAssigned: {type: string, nullable: true}
+        engineerAssigned: {type: string, nullable: true}
+        pmName: {type: string, nullable: true}
+        engineerName: {type: string, nullable: true}
+        taskDeadline: {type: string, nullable: true}
+        taskStatus: {type: string, nullable: true}
+        taskUpdatedAt: {type: string, format: date-time, nullable: true}
+        reopenRequested: {type: boolean}
+
+    ProjectNamed:
+      type: object
+      properties:
+        success: {type: boolean}
+        project: {$ref: '#/components/schemas/ProjectNamedItem'}
+
+    PublicRoomMeta:
+      type: object
+      properties:
+        success: {type: boolean}
+        room:
+          type: object
+          properties:
+            id: {type: string}
+            isClosed: {type: boolean}
+            reopenRequestedByClient: {type: boolean}
+        project:
+          type: object
+          properties:
+            id: {type: string, nullable: true}
+            status: {type: string, nullable: true}
+            hasRatings: {type: boolean}
+
+    PublicProjectByKey:
+      type: object
+      properties:
+        success: {type: boolean}
+        project:
+          type: object
+          properties:
+            id: {type: string}
+            firstName: {type: string}
+            lastName: {type: string}
+            email: {type: string}
+            title: {type: string}
+            status: {type: string}
+        chatRoom:
+          type: object
+          nullable: true
+          properties:
+            id: {type: string}
+            title: {type: string}
+            isClosed: {type: boolean}
+            roomKey: {type: string, nullable: true}
+            reopenRequestedByClient: {type: boolean}
+
+    ReopenResponse:
+      type: object
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        room:
+          type: object
+          properties:
+            id: {type: string}
+            isClosed: {type: boolean}
+            reopenRequestedByClient: {type: boolean}
+        project:
+          type: object
+          properties:
+            id: {type: string}
+            status: {type: string}
+
+    Attachment:
+      type: object
+      properties:
+        url: {type: string, example: "/api/files/673...abc?download=0"}
+        name: {type: string}
+        type: {type: string}
+        size: {type: integer}
+        fileId: {type: string}
+
+    Message:
+      type: object
+      properties:
+        _id: {type: string}
+        room: {type: string}
+        sender: {type: string, nullable: true}
+        senderType: {type: string, enum: [User, Client, System]}
+        senderRole: {type: string}
+        senderName: {type: string}
+        clientEmail: {type: string, nullable: true}
+        text: {type: string}
+        attachments:
+          type: array
+          items: {$ref: '#/components/schemas/Attachment'}
+        createdAt: {type: string, format: date-time}
+        createdAtISO: {type: string}
+        visibleTo: {type: string, example: "All"}
+        kind: {type: string, nullable: true}
+
+    ChatMessageResponse:
+      type: object
+      properties:
+        success: {type: boolean}
+        message: {$ref: '#/components/schemas/Message'}
+
+    ChatMessages:
+      type: object
+      properties:
+        success: {type: boolean}
+        messages:
+          type: array
+          items: {$ref: '#/components/schemas/Message'}
+
+    PublicChatMessages:
+      allOf:
+        - $ref: '#/components/schemas/ChatMessages'
+      properties:
+        nextCursor:
+          type: string
+          nullable: true
+
+    ChatRoom:
+      type: object
+      properties:
+        success: {type: boolean}
+        room:
+          type: object
+          properties:
+            _id: {type: string}
+            title: {type: string}
+            roomKey: {type: string}
+            members:
+              type: array
+              items: {type: string}
+            isClosed: {type: boolean}
+            request: {type: string, nullable: true}
+            updatedAt: {type: string, format: date-time}
+            createdAt: {type: string, format: date-time}
+
+    MyClientRoom:
+      type: object
+      properties:
+        id: {type: string, description: "If legacy, may be prefixed with `req:`"}
+        title: {type: string}
+        hasRoom: {type: boolean}
+        isClosed: {type: boolean}
+        updatedAtISO: {type: string}
+        requestId: {type: string}
+        clientKey: {type: string}
+
+    CreateTask:
+      type: object
+      required: [requestId, engineerId, title, description]
+      properties:
+        requestId: {type: string}
+        engineerId: {type: string}
+        title: {type: string}
+        description: {type: string}
+        deadline: {type: string, format: date-time, nullable: true}
+        pmDeadline: {type: string, format: date-time, nullable: true}
+
+    Task:
+      type: object
+      additionalProperties: true
+
+    TaskCreated:
+      type: object
+      properties:
+        success: {type: boolean}
+        task: {$ref: '#/components/schemas/Task'}
+
+    TaskCompleted:
+      type: object
+      properties:
+        success: {type: boolean}
+        task: {$ref: '#/components/schemas/Task'}
+
+    NotificationsPage:
+      type: object
+      properties:
+        success: {type: boolean}
+        notifications:
+          type: array
+          items:
+            type: object
+            properties:
+              _id: {type: string}
+              type: {type: string}
+              title: {type: string}
+              body: {type: string}
+              link: {type: string}
+              meta: {type: object, additionalProperties: true}
+              createdAt: {type: string, format: date-time}
+              readAt: {type: string, format: date-time, nullable: true}
+        nextCursor: {type: string, nullable: true}
+
+    ManagementOverview:
+      type: object
+      properties:
+        success: {type: boolean}
+        data:
+          type: object
+          properties:
+            staff:
+              type: object
+              properties:
+                total: {type: integer}
+                pms: {type: integer}
+                engs: {type: integer}
+                admins: {type: integer}
+                pmActive: {type: integer}
+                pmIdle: {type: integer}
+                engActive: {type: integer}
+                engIdle: {type: integer}
+            projects:
+              type: object
+              properties:
+                open: {type: integer}
+                inProgress: {type: integer}
+                completed: {type: integer}
+            topBusy:
+              type: array
+              items:
+                type: object
+                properties:
+                  firstName: {type: string}
+                  lastName: {type: string}
+                  role: {type: string}
+                  email: {type: string}
+                  numberOfTask: {type: integer}
+                  isBusy: {type: boolean}
+                  online: {type: boolean}
+
+    BulkUpdateUsers:
+      type: object
+      required: [ids, patch]
+      properties:
+        ids:
+          type: array
+          items: {type: string}
+        patch:
+          type: object
+          properties:
+            isBusy: {type: boolean}
+            online: {type: boolean}
+            isActive: {type: boolean}
+            role: {type: string, enum: [PM, Engineer, Admin]}
+
+    ToggleUser:
+      type: object
+      properties:
+        isBusy: {type: boolean}
+        online: {type: boolean}
+        isActive: {type: boolean}

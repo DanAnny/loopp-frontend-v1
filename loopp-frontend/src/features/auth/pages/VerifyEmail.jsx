@@ -118,7 +118,7 @@ export default function VerifyEmail() {
                   Want to jump back into your workspace?
                 </p>
                 <Link
-                  to="/client-sign-up"
+                  to="/client-sign-in"
                   className="group inline-flex items-center justify-center gap-2 px-6 py-3 bg-black text-white rounded-lg hover:bg-black/90 transition-all"
                 >
                   Go to sign up / login

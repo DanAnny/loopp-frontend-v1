@@ -17,6 +17,7 @@ import AdminAnalytics from './features/dashboard/pages/Analytics'
 import ClientChat from './features/chat/pages/ClientChat'
 import ClientSignUp from './features/auth/pages/ClientSignUp'
 import ClientSignIn from './features/auth/pages/ClientSignIn'
+import VerifyEmail from './features/auth/pages/VerifyEmail'
 
 const Text = ({ title }) => (
   <div className="p-2">
@@ -39,6 +40,9 @@ export const router = createBrowserRouter([
   // Client chat (no navbar/sidebar) — authenticated required
   { path: '/client-chat', element: <ClientChat /> },
   { path: '/client-chat/:clientKey', element: <ClientChat /> },
+
+  // Email verification page
+  { path: '/verify-email', element: <VerifyEmail /> },
 
   // ---------- App routes INSIDE Shell ----------
   {

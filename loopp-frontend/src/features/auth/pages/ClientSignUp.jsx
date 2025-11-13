@@ -20,7 +20,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 
-import CheckEmail from "../components/CheckEmail.jsx"; 
+import CheckEmail from "../components/CheckEmail.jsx";
 
 /* -------------------------------------------------------------------------- */
 /*                           WP param persistence utils                       */
@@ -151,7 +151,8 @@ function VerifiedCard({ email, onContinue }) {
             Email verified
           </h1>
           <p className="text-gray-600 mb-6">
-            <span className="text-black font-medium">{email}</span> is confirmed.
+            <span className="text-black font-medium">{email}</span> is
+            confirmed.
           </p>
 
           <button
@@ -211,7 +212,9 @@ export default function ClientSignUp() {
   const verifyTokenFromURL = qs.get("verifyToken") || ""; // optional same-tab token
 
   const clientKey = isPlaceholder(rawKey) ? "" : rawKey.trim();
-  const projectTitle = isPlaceholder(rawTitle) ? "" : safeDecodeTwice(rawTitle).trim();
+  const projectTitle = isPlaceholder(rawTitle)
+    ? ""
+    : safeDecodeTwice(rawTitle).trim();
   const firstNameFromURL = isPlaceholder(rawFirst) ? "" : rawFirst.trim();
   const lastNameFromURL = isPlaceholder(rawLast) ? "" : rawLast.trim();
   const emailFromURL = isPlaceholder(rawEmail) ? "" : rawEmail.trim();
@@ -318,10 +321,12 @@ export default function ClientSignUp() {
       let signupVerification = { sent: false, expiresInHours: null };
       try {
         const signUpResp = await authService.signUpClient(form);
-        const verification = signUpResp?.data?.verification || signUpResp?.verification;
+        const verification =
+          signUpResp?.data?.verification || signUpResp?.verification;
         if (verification?.sent) {
           signupVerification.sent = true;
-          signupVerification.expiresInHours = verification?.expiresInHours ?? null;
+          signupVerification.expiresInHours =
+            verification?.expiresInHours ?? null;
         }
       } catch {
         // ignore "already exists" etc — sign-in will handle next
@@ -597,7 +602,9 @@ export default function ClientSignUp() {
                 <div className="w-12 h-12 rounded-xl bg-white/10 backdrop-blur-sm border border-white/20 flex items-center justify-center">
                   <div className="w-6 h-6 rounded-md bg-gradient-to-br from-black to-[#fdcece]" />
                 </div>
-                <span className="text-white text-2xl tracking-tight">Loopp</span>
+                <span className="text-white text-2xl tracking-tight">
+                  Loopp
+                </span>
               </motion.div>
 
               <motion.h1
@@ -826,11 +833,11 @@ export default function ClientSignUp() {
                                       setForm((p) => ({ ...p, gender: opt }));
                                       setGenderOpen(false);
                                     }}
-                                    className={`w-full text-left px-11 pr-10 py-2 text-[14px] transition
+                                    className={`w-full text-left px-11 pr-10 py-2 text-[14px] transition-colors duration-150
                                       ${
                                         active
-                                          ? "bg-black text-white"
-                                          : "bg-black/80 text-white hover:bg-black"
+                                          ? "bg-white text-black"
+                                          : "bg-black text-white hover:bg-white hover:text-black"
                                       }`}
                                   >
                                     {opt}

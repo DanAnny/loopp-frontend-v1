@@ -121,7 +121,7 @@ export default function VerifyEmail() {
                   to="/client-sign-in"
                   className="group inline-flex items-center justify-center gap-2 px-6 py-3 bg-black text-white rounded-lg hover:bg-black/90 transition-all"
                 >
-                  Go to sign up / login
+                  Go to sign in
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
                 </Link>
               </div>

@@ -182,7 +182,10 @@ function ConnectionErrorOverlay({
             className="absolute inset-0 h-full w-full"
           >
             <g
-              style={{ transformOrigin: "50px 50px", animation: "gear-rotate 3.5s linear infinite" }}
+              style={{
+                transformOrigin: "50px 50px",
+                animation: "gear-rotate 3.5s linear infinite",
+              }}
             >
               <circle cx="50" cy="50" r="16" fill="#e5e7eb" />
               {[...Array(8)].map((_, i) => {
@@ -210,7 +213,10 @@ function ConnectionErrorOverlay({
           <svg
             viewBox="0 0 120 120"
             className="absolute -bottom-1 -right-2 h-14 w-14"
-            style={{ transformOrigin: "20px 100px", animation: "wrench-wiggle 1.6s ease-in-out infinite" }}
+            style={{
+              transformOrigin: "20px 100px",
+              animation: "wrench-wiggle 1.6s ease-in-out infinite",
+            }}
           >
             <path
               d="M85 30a14 14 0 0 0-18 18l-30 30a8 8 0 1 0 11 11l30-30a14 14 0 0 0 7-29z"
@@ -231,7 +237,10 @@ function ConnectionErrorOverlay({
                 animation: `spark-pop 1.2s ease-in-out ${i * 0.2}s infinite`,
               }}
             >
-              <path d="M12 2l2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5z" fill="#f59e0b" />
+              <path
+                d="M12 2l2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5z"
+                fill="#f59e0b"
+              />
             </svg>
           ))}
         </div>
@@ -257,7 +266,8 @@ function ConnectionErrorOverlay({
         </div>
 
         <div className="mt-3 text-[11px] text-gray-500">
-          Tip: If this keeps happening, check your internet connection or try switching networks.
+          Tip: If this keeps happening, check your internet connection or try
+          switching networks.
         </div>
       </div>
     </div>
@@ -339,7 +349,9 @@ function reconcileMineWithoutNonce(prev, shaped) {
     clientNonce: shaped.clientNonce || prev[realIdx].clientNonce,
     status: normalizeStatus(shaped) || "sent",
     deliveryStatus: shaped.deliveryStatus || "sent",
-    attachments: Array.isArray(shaped.attachments) ? shaped.attachments : prev[realIdx].attachments,
+    attachments: Array.isArray(shaped.attachments)
+      ? shaped.attachments
+      : prev[realIdx].attachments,
   };
   return next;
 }
@@ -368,6 +380,7 @@ const shapeForClient = (m) => {
         "PM/Engineer");
 
   const attachments = Array.isArray(m.attachments) ? m.attachments : [];
+  const allowRating = !!(m.allowRating || (m.meta && m.meta.allowRating));
 
   return {
     _id: m._id || m.id || `${Date.now()}-${Math.random()}`,
@@ -382,6 +395,7 @@ const shapeForClient = (m) => {
     senderRole: role || "Client",
     senderName,
     attachments,
+    allowRating,
     bubbleTheme: roleToTheme(role || "", "isMine" in m ? !!m.isMine : mine),
     clientNonce: m.clientNonce || m.nonce || undefined,
     status: normalizeStatus(m),
@@ -507,12 +521,35 @@ const groupMessagesByDate = (messages) => {
   }));
 };
 
+/* ----- conversation timestamp formatting (sidebar) ---- */
+const formatConversationTime = (dateInput) => {
+  const date =
+    dateInput instanceof Date ? dateInput : new Date(dateInput || Date.now());
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  const isToday = date.toDateString() === today.toDateString();
+  const isYesterday = date.toDateString() === yesterday.toDateString();
+
+  if (isToday) {
+    return date.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+  if (isYesterday) return "Yesterday";
+
+  return date.toLocaleDateString("en-US", { weekday: "long" });
+};
+
 /* ----- Inline dashed notices (presence banners) ---- */
 function InlineNotice({ text }) {
   return (
     <div className="my-3 flex items-center justify-center">
       <div className="w-full text-center text-[11px] md:text-xs tracking-wide text-black/65">
-        {"—".repeat(6)} <span className="font-semibold uppercase">{text}</span>{" "}
+        {"—".repeat(6)}{" "}
+        <span className="font-semibold uppercase">{text}</span>{" "}
         {"—".repeat(6)}
       </div>
     </div>
@@ -553,7 +590,7 @@ function useToast() {
   return [toast, setToast];
 }
 
-/* ------------------ Rating UI (kept) ------------------ */
+/* ------------------ Rating UI (kept, but /rate removed) ------------------ */
 function Stars({ value, onChange, label }) {
   return (
     <div className="space-y-2">
@@ -633,7 +670,9 @@ function RatingSheet({ requestId, onClose, onRated }) {
       <div className="p-4 md:p-6">
         <div className="flex items-start justify-between">
           <div>
-            <h4 className="text-lg font-semibold text-black">Rate your experience</h4>
+            <h4 className="text-lg font-semibold text-black">
+              Rate your experience
+            </h4>
             <p className="text-sm text-black/60">
               Please rate your Project Manager, Engineer, and Teamwork.
               Comments are required.
@@ -747,10 +786,20 @@ function ensureSeedParticipants(map, roomId, meta) {
     const pmName = [pm.firstName, pm.lastName].filter(Boolean).join(" ").trim() || "PM";
     next = upsertMember(next, roomId, "PM", "PM", pmName, STATUS_AWAY);
   }
-  const eng = meta?.engineer || meta?.project?.engineer || meta?.room?.engineer;
+  const eng =
+    meta?.engineer || meta?.project?.engineer || meta?.room?.engineer;
   if (eng) {
-    const engName = [eng.firstName, eng.lastName].filter(Boolean).join(" ").trim() || "Engineer";
-    next = upsertMember(next, roomId, "Engineer", "Engineer", engName, STATUS_AWAY);
+    const engName =
+      [eng.firstName, eng.lastName].filter(Boolean).join(" ").trim() ||
+      "Engineer";
+    next = upsertMember(
+      next,
+      roomId,
+      "Engineer",
+      "Engineer",
+      engName,
+      STATUS_AWAY
+    );
   }
   return next;
 }
@@ -881,7 +930,9 @@ export default function ClientChat() {
         setErr("");
         setFatal(null); // clear any previous fatal state before attempting
 
-        const res = await fetchClientRoomMessages(activeRoomId, { limit: 100 });
+        const res = await fetchClientRoomMessages(activeRoomId, {
+          limit: 100,
+        });
         const shaped = (res?.messages || []).map(shapeForClient);
         setMessages(shaped);
 
@@ -891,6 +942,11 @@ export default function ClientChat() {
           const metaRes = await Projects.getRoomMeta(activeRoomId);
           roomMeta = metaRes?.data?.room || metaRes?.room || metaRes || {};
         } catch {}
+
+        const project =
+          roomMeta?.project || roomMeta?.data?.project || roomMeta?.pr || {};
+        const alreadyRated = !!project.hasRatings;
+        setHasRated(alreadyRated);
 
         setPresenceByRoom((prev) => {
           // Client = ONLINE, PM/Engineer = AWAY by default
@@ -993,7 +1049,12 @@ export default function ClientChat() {
               // if came later with better status, update it
               return prev.map((x) =>
                 x._id === shapedMsg._id
-                  ? { ...x, status: normalizeStatus(shapedMsg) || x.status, deliveryStatus: shapedMsg.deliveryStatus || x.deliveryStatus }
+                  ? {
+                      ...x,
+                      status: normalizeStatus(shapedMsg) || x.status,
+                      deliveryStatus:
+                        shapedMsg.deliveryStatus || x.deliveryStatus,
+                    }
                   : x
               );
             }
@@ -1007,12 +1068,15 @@ export default function ClientChat() {
                 next[nIdx] = {
                   ...next[nIdx],
                   _id: shapedMsg._id,
-                  createdAtISO: shapedMsg.createdAtISO || next[nIdx].createdAtISO,
+                  createdAtISO:
+                    shapedMsg.createdAtISO || next[nIdx].createdAtISO,
                   timestamp: shapedMsg.timestamp || next[nIdx].timestamp,
                   clientNonce: shapedMsg.clientNonce,
                   status: normalizeStatus(shapedMsg) || "sent",
                   deliveryStatus: shapedMsg.deliveryStatus || "sent",
-                  attachments: Array.isArray(shapedMsg.attachments) ? shapedMsg.attachments : next[nIdx].attachments,
+                  attachments: Array.isArray(shapedMsg.attachments)
+                    ? shapedMsg.attachments
+                    : next[nIdx].attachments,
                 };
                 return next;
               }
@@ -1025,8 +1089,13 @@ export default function ClientChat() {
                 (x) =>
                   x.isMine &&
                   shapedMsg.isMine &&
-                  (x.content || "").trim() === (shapedMsg.content || "").trim() &&
-                  closeInTime(x.createdAtISO, shapedMsg.createdAtISO, 15000)
+                  (x.content || "").trim() ===
+                    (shapedMsg.content || "").trim() &&
+                  closeInTime(
+                    x.createdAtISO,
+                    shapedMsg.createdAtISO,
+                    15000
+                  )
               );
 
             if (idxFromEnd !== -1) {
@@ -1035,12 +1104,15 @@ export default function ClientChat() {
               next[realIdx] = {
                 ...next[realIdx],
                 _id: shapedMsg._id,
-                createdAtISO: shapedMsg.createdAtISO || prev[realIdx].createdAtISO,
+                createdAtISO:
+                  shapedMsg.createdAtISO || prev[realIdx].createdAtISO,
                 timestamp: shapedMsg.timestamp || prev[realIdx].timestamp,
                 clientNonce: shapedMsg.clientNonce || prev[realIdx].clientNonce,
                 status: normalizeStatus(shapedMsg) || "sent",
                 deliveryStatus: shapedMsg.deliveryStatus || "sent",
-                attachments: Array.isArray(shapedMsg.attachments) ? shapedMsg.attachments : prev[realIdx].attachments,
+                attachments: Array.isArray(shapedMsg.attachments)
+                  ? shapedMsg.attachments
+                  : prev[realIdx].attachments,
               };
               return next;
             }
@@ -1074,7 +1146,8 @@ export default function ClientChat() {
           setTypingByRoom((prev) => {
             const map = { ...(prev[roomId] || {}) };
             const key = displayRole; // stable key by role
-            if (isTyping) map[key] = { role: displayRole, until: Date.now() + 2500 };
+            if (isTyping)
+              map[key] = { role: displayRole, until: Date.now() + 2500 };
             else delete map[key];
             return { ...prev, [roomId]: map };
           });
@@ -1106,7 +1179,9 @@ export default function ClientChat() {
             const label = noticeFromSystemEvent(payload);
             if (label) {
               const msg = {
-                _id: `sys-${payload.type}-${payload.timestamp || Date.now()}-${Math.random()}`,
+                _id: `sys-${payload.type}-${
+                  payload.timestamp || Date.now()
+                }-${Math.random()}`,
                 room: String(activeRoomId),
                 inlineNotice: true,
                 noticeText: label,
@@ -1131,23 +1206,58 @@ export default function ClientChat() {
           // presence updates (role-keyed)
           setPresenceByRoom((prev) => {
             let next = { ...prev };
-            const pmName = [pm?.firstName, pm?.lastName].filter(Boolean).join(" ").trim() || "PM";
-            const engName = [eng?.firstName, eng?.lastName].filter(Boolean).join(" ").trim() || "Engineer";
+            const pmName =
+              [pm?.firstName, pm?.lastName].filter(Boolean).join(" ").trim() ||
+              "PM";
+            const engName =
+              [eng?.firstName, eng?.lastName].filter(Boolean).join(" ").trim() ||
+              "Engineer";
 
             if (!rid || rid === String(activeRoomId)) {
               if (type === "pm_assigned") {
                 // PM exists but may not be in the room yet -> AWAY
-                next = upsertMember(next, activeRoomId, "PM", "PM", pmName, STATUS_AWAY);
+                next = upsertMember(
+                  next,
+                  activeRoomId,
+                  "PM",
+                  "PM",
+                  pmName,
+                  STATUS_AWAY
+                );
               }
               if (type === "pm_online") {
                 // When we do receive it (if broadcast), consider ACTIVE in room now
-                next = upsertMember(next, activeRoomId, "PM", "PM", pmName, STATUS_ONLINE);
+                next = upsertMember(
+                  next,
+                  activeRoomId,
+                  "PM",
+                  "PM",
+                  pmName,
+                  STATUS_ONLINE
+                );
               }
-              if (type === "pm_assigned_engineer" || type === "engineer_joined") {
-                next = upsertMember(next, activeRoomId, "Engineer", "Engineer", engName, STATUS_ONLINE);
+              if (
+                type === "pm_assigned_engineer" ||
+                type === "engineer_joined"
+              ) {
+                next = upsertMember(
+                  next,
+                  activeRoomId,
+                  "Engineer",
+                  "Engineer",
+                  engName,
+                  STATUS_ONLINE
+                );
               }
               if (type === "engineer_online") {
-                next = upsertMember(next, activeRoomId, "Engineer", "Engineer", engName, STATUS_ONLINE);
+                next = upsertMember(
+                  next,
+                  activeRoomId,
+                  "Engineer",
+                  "Engineer",
+                  engName,
+                  STATUS_ONLINE
+                );
               }
             }
             return next;
@@ -1160,7 +1270,9 @@ export default function ClientChat() {
 
           setRooms((prev) =>
             prev.map((r) =>
-              String(r.id) === String(activeRoomId) ? { ...r, isClosed: true } : r
+              String(r.id) === String(activeRoomId)
+                ? { ...r, isClosed: true }
+                : r
             )
           );
           setHeader((h) => ({ ...h, status: "Closed" }));
@@ -1185,7 +1297,9 @@ export default function ClientChat() {
 
           setRooms((prev) =>
             prev.map((r) =>
-              String(r.id) === String(activeRoomId) ? { ...r, isClosed: false } : r
+              String(r.id) === String(activeRoomId)
+                ? { ...r, isClosed: false }
+                : r
             )
           );
           setReopenRequested(false);
@@ -1230,7 +1344,8 @@ export default function ClientChat() {
 
           const pmFirst = payload?.pm?.firstName || "";
           const pmLast = payload?.pm?.lastName || "";
-          const pmName = [pmFirst, pmLast].filter(Boolean).join(" ").trim() || "PM";
+          const pmName =
+            [pmFirst, pmLast].filter(Boolean).join(" ").trim() || "PM";
 
           setRooms((prev) =>
             prev.map((r) =>
@@ -1245,7 +1360,9 @@ export default function ClientChat() {
           );
 
           const inline = {
-            _id: `pm-assigned-inline-${payload?.at || Date.now()}-${Math.random()}`,
+            _id: `pm-assigned-inline-${
+              payload?.at || Date.now()
+            }-${Math.random()}`,
             room: String(activeRoomId),
             inlineNotice: true,
             noticeText: "A PM HAS BEEN ASSIGNED",
@@ -1260,7 +1377,14 @@ export default function ClientChat() {
 
           // PM appears as AWAY (until they type / join)
           setPresenceByRoom((prev) =>
-            upsertMember(prev, activeRoomId, "PM", "PM", pmName, STATUS_AWAY)
+            upsertMember(
+              prev,
+              activeRoomId,
+              "PM",
+              "PM",
+              pmName,
+              STATUS_AWAY
+            )
           );
 
           if (atBottomRef.current) {
@@ -1278,7 +1402,8 @@ export default function ClientChat() {
           const { clientNonce, _id } = payload || {};
           setMessages((prev) =>
             prev.map((m) =>
-              (clientNonce && m.clientNonce === clientNonce) || (_id && m._id === _id)
+              (clientNonce && m.clientNonce === clientNonce) ||
+              (_id && m._id === _id)
                 ? { ...m, status: "delivered", deliveryStatus: "delivered" }
                 : m
             )
@@ -1288,7 +1413,8 @@ export default function ClientChat() {
           const { clientNonce, _id } = payload || {};
           setMessages((prev) =>
             prev.map((m) =>
-              (clientNonce && m.clientNonce === clientNonce) || (_id && m._id === _id)
+              (clientNonce && m.clientNonce === clientNonce) ||
+              (_id && m._id === _id)
                 ? { ...m, status: "read", deliveryStatus: "read" }
                 : m
             )
@@ -1317,7 +1443,9 @@ export default function ClientChat() {
         s.on("message:read", onRead);
       } catch (e) {
         // fallback generic
-        setErr(e?.response?.data?.message || e?.message || "Failed to load messages");
+        setErr(
+          e?.response?.data?.message || e?.message || "Failed to load messages"
+        );
       }
     })();
 
@@ -1344,7 +1472,9 @@ export default function ClientChat() {
   /* ----- ensure "You" is ONLINE when switching rooms ----- */
   useEffect(() => {
     if (!activeRoomId) return;
-    setPresenceByRoom((prev) => setStatus(prev, activeRoomId, "Client", STATUS_ONLINE));
+    setPresenceByRoom((prev) =>
+      setStatus(prev, activeRoomId, "Client", STATUS_ONLINE)
+    );
     setPresenceOpen(false);
   }, [activeRoomId]);
 
@@ -1426,31 +1556,15 @@ export default function ClientChat() {
 
   const onSend = async (text, files = []) => {
     const active = rooms.find((r) => r.id === activeRoomId);
-    if (!activeRoomId || !active?.hasRoom || active?.isClosed || header.status === "Closed") return;
+    if (
+      !activeRoomId ||
+      !active?.hasRoom ||
+      active?.isClosed ||
+      header.status === "Closed"
+    )
+      return;
 
     const trimmed = (text || "").trim();
-
-    if (trimmed === "/rate") {
-      try {
-        const metaRes = await Projects.getRoomMeta(activeRoomId);
-        const pr = metaRes?.data?.project || metaRes?.project || {};
-        const status = String(pr?.status || "").toLowerCase();
-        const already = !!pr?.hasRatings || hasRated;
-
-        if (status !== "review") {
-          setToast({ text: "You can only rate when the project is in Review.", kind: "warn" });
-          return;
-        }
-        if (already) {
-          setToast({ text: "You’ve already submitted a rating.", kind: "error" });
-          return;
-        }
-        setRatingOpen(true);
-      } catch {
-        setToast({ text: "Unable to open rating right now.", kind: "error" });
-      }
-      return;
-    }
 
     let fileArray = [];
     if (files) {
@@ -1470,7 +1584,9 @@ export default function ClientChat() {
     }
 
     // NEW: attach a clientNonce so the server echo can reconcile perfectly
-    const clientNonce = `cli-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const clientNonce = `cli-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 9)}`;
 
     // 1) Optimistic append immediately (spinner visible)
     appendOptimistic(trimmed, fileArray, clientNonce);
@@ -1530,13 +1646,20 @@ export default function ClientChat() {
   // Retry handler (passed down to MessageBubble via onRetry)
   const handleRetry = async (message) => {
     const { content, attachments = [], clientNonce: oldNonce } = message || {};
-    const newNonce = `cli-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const newNonce = `cli-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 9)}`;
 
     // mark old as pending again with new nonce (so reconcilers work)
     setMessages((prev) =>
       prev.map((m) =>
         m.clientNonce === oldNonce
-          ? { ...m, status: "pending", deliveryStatus: "sending", clientNonce: newNonce }
+          ? {
+              ...m,
+              status: "pending",
+              deliveryStatus: "sending",
+              clientNonce: newNonce,
+            }
           : m
       )
     );
@@ -1568,7 +1691,8 @@ export default function ClientChat() {
   const onTypingChange = (isTyping) => {
     const s = getSocket();
     const active = rooms.find((r) => r.id === activeRoomId);
-    if (!s || !activeRoomId || header.status === "Closed" || active?.isClosed) return;
+    if (!s || !activeRoomId || header.status === "Closed" || active?.isClosed)
+      return;
     s.emit("typing", {
       roomId: activeRoomId,
       userId: "client",
@@ -1601,7 +1725,9 @@ export default function ClientChat() {
     } catch (e) {
       setToast({
         text:
-          e?.response?.data?.message || e?.message || "Failed to request reopen",
+          e?.response?.data?.message ||
+          e?.message ||
+          "Failed to request reopen",
         kind: "error",
       });
     }
@@ -1626,7 +1752,9 @@ export default function ClientChat() {
     const selectedText = sel && String(sel.toString()).trim();
     lastRightClickText.current =
       selectedText ||
-      (e.target?.innerText ? String(e.target.innerText).trim().slice(0, 2000) : "");
+      (e.target?.innerText
+        ? String(e.target.innerText).trim().slice(0, 2000)
+        : "");
     setMenuPos({ x: e.clientX, y: e.clientY });
     setMenuOpen(true);
   };
@@ -1653,9 +1781,19 @@ export default function ClientChat() {
     { id: "delete", label: "Delete (if allowed)", onClick: () => {} },
   ];
 
+  // Clicking a "rating CTA" message opens the rating modal (once)
+  const handleMessageClick = (m) => {
+  if (!m.allowRating) return;
+    // allow opening modal even if they've already rated
+    setRatingOpen(true);
+  };
+
   /* --------------------------------- render --------------------------------- */
 
-  if (loading) return <div className="h-screen grid place-items-center">Loading chat…</div>;
+  if (loading)
+    return (
+      <div className="h-screen grid place-items-center">Loading chat…</div>
+    );
 
   const genericErrBanner = err ? (
     <div className="px-4 py-2 text-sm text-red-700 bg-red-50 border-b border-red-200">
@@ -1674,16 +1812,23 @@ export default function ClientChat() {
   const active = rooms.find((r) => r.id === activeRoomId);
   const requestIdForRating = active?.requestId;
 
+  // Sort conversations by latest updatedAt for sidebar views
+  const sortedRooms = [...rooms].sort(
+    (a, b) =>
+      new Date(b.updatedAtISO || b.updatedAt || 0) -
+      new Date(a.updatedAtISO || a.updatedAt || 0)
+  );
+
   // Presence model -> participants for header
-  const members = (presenceByRoom[activeRoomId]?.members || []);
+  const members = presenceByRoom[activeRoomId]?.members || [];
   const totalUsers = members.length;
 
   const participantsForHeader = members.map((m) => ({
     id: m.id || m.role,
     name: m.name,
     role: m.role,
-    isOnline: m.status !== STATUS_OFFLINE,   // online or away
-    inRoom: m.status === STATUS_ONLINE,      // active in this room
+    isOnline: m.status !== STATUS_OFFLINE, // online or away
+    inRoom: m.status === STATUS_ONLINE, // active in this room
   }));
 
   // Header data (status line uses typingText when online)
@@ -1733,9 +1878,25 @@ export default function ClientChat() {
             className="inline-flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm font-medium transition hover:bg-gray-100"
             title="Back"
           >
-            <svg className="w-5 h-5 md:w-6 md:h-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M10 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M4 12h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+            <svg
+              className="w-5 h-5 md:w-6 md:h-6"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M10 6l-6 6 6 6"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M4 12h16"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
             </svg>
             <span className="hidden sm:inline">Back</span>
           </a>
@@ -1773,20 +1934,24 @@ export default function ClientChat() {
 
               <div className="flex-1 min-h-0 overflow-y-auto">
                 <ConversationList
-                  conversations={rooms.map((r) => ({
-                    id: r.id,
-                    name: shortName(r.title),
-                    avatar: "",
-                    lastMessage: r.lastMessage || "",
-                    time: new Date(r.updatedAtISO || r.updatedAt || Date.now()).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    }),
-                    unreadCount: 0,
-                    isOnline: !r.isClosed,
-                    isPinned: false,
-                    typing: !!typingByRoom[r.id] && Object.keys(typingByRoom[r.id]).length > 0,
-                  }))}
+                  conversations={sortedRooms.map((r) => {
+                    const updatedDate = new Date(
+                      r.updatedAtISO || r.updatedAt || Date.now()
+                    );
+                    return {
+                      id: r.id,
+                      name: shortName(r.title),
+                      avatar: "",
+                      lastMessage: r.lastMessage || "",
+                      time: formatConversationTime(updatedDate),
+                      unreadCount: 0,
+                      isOnline: !r.isClosed,
+                      isPinned: false,
+                      typing:
+                        !!typingByRoom[r.id] &&
+                        Object.keys(typingByRoom[r.id]).length > 0,
+                    };
+                  })}
                   activeConversationId={activeRoomId}
                   onConversationSelect={(id) => {
                     setActiveRoomId(id);
@@ -1807,20 +1972,24 @@ export default function ClientChat() {
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto">
             <ConversationList
-              conversations={rooms.map((r) => ({
-                id: r.id,
-                name: shortName(r.title),
-                avatar: "",
-                lastMessage: r.lastMessage || "",
-                time: new Date(r.updatedAtISO || r.updatedAt || Date.now()).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                }),
-                unreadCount: 0,
-                isOnline: !r.isClosed,
-                isPinned: false,
-                typing: !!typingByRoom[r.id] && Object.keys(typingByRoom[r.id]).length > 0,
-              }))}
+              conversations={sortedRooms.map((r) => {
+                const updatedDate = new Date(
+                  r.updatedAtISO || r.updatedAt || Date.now()
+                );
+                return {
+                  id: r.id,
+                  name: shortName(r.title),
+                  avatar: "",
+                  lastMessage: r.lastMessage || "",
+                  time: formatConversationTime(updatedDate),
+                  unreadCount: 0,
+                  isOnline: !r.isClosed,
+                  isPinned: false,
+                  typing:
+                    !!typingByRoom[r.id] &&
+                    Object.keys(typingByRoom[r.id]).length > 0,
+                };
+              })}
               activeConversationId={activeRoomId}
               onConversationSelect={(id) => setActiveRoomId(id)}
               loading={false}
@@ -1853,7 +2022,9 @@ export default function ClientChat() {
               {presenceOpen && (
                 <div className="absolute right-4 top-[calc(100%+8px)] z-40 w-80 rounded-xl border border-gray-200 bg-white shadow-xl">
                   <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
-                    <div className="text-sm font-semibold">Room participants</div>
+                    <div className="text-sm font-semibold">
+                      Room participants
+                    </div>
                     <button
                       onClick={() => setPresenceOpen(false)}
                       className="px-2 py-1 rounded-lg hover:bg-gray-100"
@@ -1863,53 +2034,80 @@ export default function ClientChat() {
                   </div>
                   <div className="p-3 space-y-4 text-sm">
                     <div>
-                      <div className="text-xs font-semibold text-green-700">Online (active here)</div>
+                      <div className="text-xs font-semibold text-green-700">
+                        Online (active here)
+                      </div>
                       {onlineList.length ? (
                         <ul className="mt-1 space-y-1">
                           {onlineList.map((u) => (
-                            <li key={`on-${u.id || u.role}`} className="flex items-center gap-2">
+                            <li
+                              key={`on-${u.id || u.role}`}
+                              className="flex items-center gap-2"
+                            >
                               <span className="w-2 h-2 rounded-full bg-green-500" />
                               <span className="font-medium">{u.name}</span>
-                              <span className="text-xs text-gray-500">— {u.role}</span>
+                              <span className="text-xs text-gray-500">
+                                — {u.role}
+                              </span>
                             </li>
                           ))}
                         </ul>
                       ) : (
-                        <div className="mt-1 text-xs text-gray-500">No one active</div>
+                        <div className="mt-1 text-xs text-gray-500">
+                          No one active
+                        </div>
                       )}
                     </div>
 
                     <div>
-                      <div className="text-xs font-semibold text-amber-700">Away (online, not in this room)</div>
+                      <div className="text-xs font-semibold text-amber-700">
+                        Away (online, not in this room)
+                      </div>
                       {awayList.length ? (
                         <ul className="mt-1 space-y-1">
                           {awayList.map((u) => (
-                            <li key={`aw-${u.id || u.role}`} className="flex items-center gap-2">
+                            <li
+                              key={`aw-${u.id || u.role}`}
+                              className="flex items-center gap-2"
+                            >
                               <span className="w-2 h-2 rounded-full bg-amber-500" />
                               <span className="font-medium">{u.name}</span>
-                              <span className="text-xs text-gray-500">— {u.role}</span>
+                              <span className="text-xs text-gray-500">
+                                — {u.role}
+                              </span>
                             </li>
                           ))}
                         </ul>
                       ) : (
-                        <div className="mt-1 text-xs text-gray-500">No one away</div>
+                        <div className="mt-1 text-xs text-gray-500">
+                          No one away
+                        </div>
                       )}
                     </div>
 
                     <div>
-                      <div className="text-xs font-semibold text-gray-700">Offline</div>
+                      <div className="text-xs font-semibold text-gray-700">
+                        Offline
+                      </div>
                       {offlineList.length ? (
                         <ul className="mt-1 space-y-1">
                           {offlineList.map((u) => (
-                            <li key={`off-${u.id || u.role}`} className="flex items-center gap-2">
+                            <li
+                              key={`off-${u.id || u.role}`}
+                              className="flex items-center gap-2"
+                            >
                               <span className="w-2 h-2 rounded-full bg-gray-300" />
                               <span className="font-medium">{u.name}</span>
-                              <span className="text-xs text-gray-500">— {u.role}</span>
+                              <span className="text-xs text-gray-500">
+                                — {u.role}
+                              </span>
                             </li>
                           ))}
                         </ul>
                       ) : (
-                        <div className="mt-1 text-xs text-gray-500">No one offline</div>
+                        <div className="mt-1 text-xs text-gray-500">
+                          No one offline
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1937,7 +2135,9 @@ export default function ClientChat() {
                   key={notif.id}
                   notification={notif}
                   onDismiss={(id) =>
-                    setNotifications((prev) => prev.filter((n) => n.id !== id))
+                    setNotifications((prev) =>
+                      prev.filter((n) => n.id !== id)
+                    )
                   }
                 />
               ))}
@@ -1947,7 +2147,9 @@ export default function ClientChat() {
           {/* Room Status Banner */}
           {active?.isClosed && (
             <div className="z-10 border-b px-4 py-3 flex items-center justify-between gap-2 bg-gray-100 border-gray-200">
-              <div className="text-sm text-gray-700">This room is closed.</div>
+              <div className="text-sm text-gray-700">
+                This room is closed.
+              </div>
               {!reopenRequested ? (
                 <button
                   onClick={handleRequestReopen}
@@ -1985,7 +2187,12 @@ export default function ClientChat() {
                       m.inlineNotice ? (
                         <InlineNotice key={m._id} text={m.noticeText} />
                       ) : (
-                        <div key={m._id} ref={(el) => (messageRefs.current[m._id] = el)}>
+                        <div
+                          key={m._id}
+                          ref={(el) => (messageRefs.current[m._id] = el)}
+                          onClick={() => handleMessageClick(m)}
+                          className={m.allowRating ? "cursor-pointer" : undefined}
+                        >
                           <MessageBubble
                             message={m}
                             highlighted={highlightedMessageId === m._id}
@@ -2009,9 +2216,18 @@ export default function ClientChat() {
             <div className="px-4 pb-2 z-10">
               <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs bg-white border-gray-200 text-gray-600">
                 <span className="flex gap-1">
-                  <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                  <span
+                    className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+                    style={{ animationDelay: "0ms" }}
+                  />
+                  <span
+                    className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+                    style={{ animationDelay: "150ms" }}
+                  />
+                  <span
+                    className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+                    style={{ animationDelay: "300ms" }}
+                  />
                 </span>
                 {typingText}
               </div>
@@ -2031,7 +2247,10 @@ export default function ClientChat() {
 
           {/* Unread Messages CTA */}
           {unreadCount > 0 && !isAtBottom && (
-            <UnreadMessagesIndicator count={unreadCount} onClick={scrollToBottom} />
+            <UnreadMessagesIndicator
+              count={unreadCount}
+              onClick={scrollToBottom}
+            />
           )}
         </section>
       </div>
@@ -2040,7 +2259,7 @@ export default function ClientChat() {
       {ratingOpen && requestIdForRating && (
         <RatingModal
           requestId={requestIdForRating}
-          roomId={activeRoomId} // lets the modal validate status=Review & not already rated
+          roomId={activeRoomId} // lets the modal validate status=Review & not already rated (server-side)
           onClose={() => setRatingOpen(false)}
           onRated={() => {
             setHasRated(true);

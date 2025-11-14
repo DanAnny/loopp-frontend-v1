@@ -4,8 +4,8 @@ import { apiClient } from "./http";
 /**
  * Auth + verification helpers
  * Aligned to backend routes:
- *  - POST /auth/verify/send
- *  - POST /auth/verify/consume
+ *  - POST /auth/verify/send      (send OTP to current user)
+ *  - POST /auth/verify/consume   (verify OTP code)
  *  - GET  /auth/verify/status?email=...
  *  - GET  /auth/me
  */
@@ -18,7 +18,7 @@ export const addUser = (body) => apiClient.post("/auth/add-user", body);
 
 // Token/Session
 export const refresh = () => apiClient.post("/auth/refresh");
-export const logout  = () => apiClient.post("/auth/logout", {}); // withCredentials via apiClient
+export const logout  = () => apiClient.post("/auth/logout", {});
 
 // Sign in / Sign up (client)
 export const signIn = async (body) => {
@@ -31,34 +31,65 @@ export const signUpClient = async (body) => {
   return { data };
 };
 
-// Current user profile (expects { user: {..., isVerified, email } } or raw object)
+// Current user profile
 export const me = async () => {
   const { data } = await apiClient.get("/auth/me");
   return data;
 };
 
-// Email verification flows (backend-driven)
+/* -------------------------------------------------------------------------- */
+/* Email verification / OTP flows                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Send verification OTP email to the currently authenticated user.
+ * Backend returns: { success, message?, expiresInMinutes? }
+ */
 export const sendVerificationEmail = async () => {
   const { data } = await apiClient.post("/auth/verify/send", {});
-  // { success, message?, expiresInHours? }
   return data;
 };
 
-// Alias resend to the same endpoint (backend handles issuing a fresh token)
+/**
+ * Resend verification OTP email.
+ */
 export const resendVerificationEmail = async () => {
   const { data } = await apiClient.post("/auth/verify/send", {});
   return data;
 };
 
-export const verifyEmailToken = async (token) => {
-  const { data } = await apiClient.post("/auth/verify/consume", { token });
-  // { success, email }
-  return data;
+/**
+ * Verify the email using a 6-digit OTP code.
+ *
+ * Usage:
+ *   await verifyEmailOtp({ email, code: "123456" });
+ *
+ * Backend: POST /auth/verify/consume { email, code }
+ * Response: { success, email }
+ */
+export const verifyEmailOtp = async ({ email, code }) => {
+  const { data } = await apiClient.post("/auth/verify/consume", {
+    email,
+    code,
+    otp: code, // 👈 extra alias for safety
+  });
+  return data; // { success, email }
 };
 
+/**
+ * Alias for backward compatibility.
+ * You can also call:
+ *   await verifyEmailToken({ email, code });
+ */
+export const verifyEmailToken = verifyEmailOtp;
+
+/**
+ * Check verification status for an email
+ */
 export const verifyStatus = async (email) => {
-  const { data } = await apiClient.get("/auth/verify/status", { params: { email } });
-  // { success, isVerified }
+  const { data } = await apiClient.get("/auth/verify/status", {
+    params: { email },
+  });
   return data;
 };
 
@@ -74,9 +105,10 @@ export default {
   signUpClient,
   // Me
   me,
-  // Verification
+  // Verification / OTP
   sendVerificationEmail,
   resendVerificationEmail,
+  verifyEmailOtp,
   verifyEmailToken,
   verifyStatus,
 };

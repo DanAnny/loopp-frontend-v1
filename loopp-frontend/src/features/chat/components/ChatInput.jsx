@@ -28,34 +28,43 @@ export default function ChatInput({
   const emojiRef = useRef(null);
 
   const filteredCommands = commands.filter(
-    (cmd) => text.startsWith("/") && (cmd.hint || "").toLowerCase().includes(text.slice(1).toLowerCase())
+    (cmd) =>
+      text.startsWith("/") &&
+      (cmd.hint || "").toLowerCase().includes(text.slice(1).toLowerCase())
   );
 
   useEffect(() => {
     if (text.trim()) {
       onTypingChange?.(true);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = setTimeout(() => onTypingChange?.(false), 1000);
+      typingTimeoutRef.current = setTimeout(
+        () => onTypingChange?.(false),
+        1000
+      );
     } else {
       onTypingChange?.(false);
     }
-    return () => typingTimeoutRef.current && clearTimeout(typingTimeoutRef.current);
+    return () =>
+      typingTimeoutRef.current && clearTimeout(typingTimeoutRef.current);
   }, [text, onTypingChange]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
-      if (emojiRef.current && !emojiRef.current.contains(e.target)) setShowEmoji(false);
+      if (emojiRef.current && !emojiRef.current.contains(e.target))
+        setShowEmoji(false);
     };
     if (showEmoji) {
       document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
+      return () =>
+        document.removeEventListener("mousedown", handleClickOutside);
     }
   }, [showEmoji]);
 
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + "px";
+      textareaRef.current.style.height =
+        Math.min(textareaRef.current.scrollHeight, 120) + "px";
     }
   }, [text]);
 
@@ -94,14 +103,18 @@ export default function ChatInput({
   const handleFileChange = (e) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      const picked = Array.from(files).filter((f) => f && typeof f.size === "number");
+      const picked = Array.from(files).filter(
+        (f) => f && typeof f.size === "number"
+      );
       const newAttachments = picked.map((file) => {
         const att = { file, name: file.name, size: file.size, type: file.type };
         if ((file.type || "").startsWith("image/")) {
           const reader = new FileReader();
           reader.onloadend = () => {
             setAttachments((prev) =>
-              prev.map((p) => (p.file === file ? { ...p, preview: reader.result } : p))
+              prev.map((p) =>
+                p.file === file ? { ...p, preview: reader.result } : p
+              )
             );
           };
           reader.readAsDataURL(file);
@@ -111,7 +124,9 @@ export default function ChatInput({
 
       setAttachments((prev) => {
         const seen = new Set(prev.map((p) => `${p.name}:${p.size}`));
-        const dedup = newAttachments.filter((n) => !seen.has(`${n.name}:${n.size}`));
+        const dedup = newAttachments.filter(
+          (n) => !seen.has(`${n.name}:${n.size}`)
+        );
         return [...prev, ...dedup];
       });
 
@@ -153,8 +168,14 @@ export default function ChatInput({
               }}
               className="w-full px-4 py-3 text-left hover:bg-gray-50 transition border-b border-gray-100 last:border-b-0"
             >
-              <div className="text-sm font-medium text-black">{cmd.title}</div>
-              {cmd.subtitle && <div className="text-xs text-gray-500 mt-0.5">{cmd.subtitle}</div>}
+              <div className="text-sm font-medium text-black">
+                {cmd.title}
+              </div>
+              {cmd.subtitle && (
+                <div className="text-xs text-gray-500 mt-0.5">
+                  {cmd.subtitle}
+                </div>
+              )}
             </button>
           ))}
         </div>
@@ -164,12 +185,21 @@ export default function ChatInput({
         <div className="mb-2 flex flex-wrap gap-2">
           {attachments.map((att, idx) => {
             const isImg = (att.type || "").startsWith("image/");
-            const isPdf = att.type === "application/pdf" || att.name?.toLowerCase?.().endsWith(".pdf");
+            const isPdf =
+              att.type === "application/pdf" ||
+              att.name?.toLowerCase?.().endsWith(".pdf");
             return (
-              <div key={idx} className="relative bg-gray-100 rounded-lg overflow-hidden group">
+              <div
+                key={idx}
+                className="relative bg-gray-100 rounded-lg overflow-hidden group"
+              >
                 {isImg && att.preview ? (
                   <div className="relative">
-                    <img src={att.preview} alt={att.name} className="h-24 w-24 object-cover" />
+                    <img
+                      src={att.preview}
+                      alt={att.name}
+                      className="h-24 w-24 object-cover"
+                    />
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
                       <button
                         onClick={() => removeAttachment(idx)}
@@ -179,19 +209,32 @@ export default function ChatInput({
                       </button>
                     </div>
                     <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-2 py-1">
-                      <span className="text-white text-[10px] truncate block">{att.name}</span>
+                      <span className="text-white text-[10px] truncate block">
+                        {att.name}
+                      </span>
                     </div>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 px-3 py-2 min-w-[200px]">
                     <div className="p-2 bg-gray-200 rounded">
-                      {isPdf ? <FileText className="w-5 h-5 text-red-600" /> : <File className="w-5 h-5 text-gray-600" />}
+                      {isPdf ? (
+                        <FileText className="w-5 h-5 text-red-600" />
+                      ) : (
+                        <File className="w-5 h-5 text-gray-600" />
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs truncate font-medium">{att.name}</div>
-                      <div className="text-[10px] text-gray-500">{(att.size / 1024).toFixed(1)} KB</div>
+                      <div className="text-xs truncate font-medium">
+                        {att.name}
+                      </div>
+                      <div className="text-[10px] text-gray-500">
+                        {(att.size / 1024).toFixed(1)} KB
+                      </div>
                     </div>
-                    <button onClick={() => removeAttachment(idx)} className="p-1 hover:bg-gray-200 rounded transition">
+                    <button
+                      onClick={() => removeAttachment(idx)}
+                      className="p-1 hover:bg-gray-200 rounded transition"
+                    >
                       <X className="w-4 h-4 text-gray-500" />
                     </button>
                   </div>
@@ -206,8 +249,9 @@ export default function ChatInput({
         <button
           onClick={handleFileSelect}
           disabled={disabled}
-          className="p-2 hover:bg-gray-100 rounded-lg transition disabled:opacity-50 flex-shrink-0"
+          className="p-2 hover:bg-gray-100 hover:scale-105 rounded-lg transition disabled:opacity-50 flex-shrink-0"
           aria-label="Attach file"
+          title="Attach files"
         >
           <Paperclip className="w-5 h-5 text-gray-600" />
         </button>
@@ -216,8 +260,9 @@ export default function ChatInput({
           <button
             onClick={() => setShowEmoji((s) => !s)}
             disabled={disabled}
-            className="p-2 hover:bg-gray-100 rounded-lg transition disabled:opacity-50"
+            className="p-2 hover:bg-gray-100 hover:scale-105 rounded-lg transition disabled:opacity-50"
             aria-label="Insert emoji"
+            title="Insert emoji"
           >
             <Smile className="w-5 h-5 text-gray-600" />
           </button>
@@ -229,7 +274,7 @@ export default function ChatInput({
                   <button
                     key={idx}
                     onClick={() => insertEmoji(emoji)}
-                    className="text-2xl hover:bg-gray-100 rounded p-1 transition"
+                    className="text-2xl hover:bg-gray-100 hover:scale-110 rounded p-1 transition-transform"
                   >
                     {emoji}
                   </button>
@@ -262,7 +307,13 @@ export default function ChatInput({
           <Send className="w-5 h-5" />
         </button>
 
-        <input ref={fileInputRef} type="file" multiple onChange={handleFileChange} className="hidden" />
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          onChange={handleFileChange}
+          className="hidden"
+        />
       </div>
     </div>
   );

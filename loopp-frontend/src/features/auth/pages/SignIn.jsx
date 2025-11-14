@@ -85,7 +85,7 @@ export default function SignIn() {
         className="absolute inset-0 bg-cover bg-center pointer-events-none lg:hidden"
         style={{
           backgroundImage:
-            "linear-gradient(rgba(0,0,0,.15), rgba(0,0,0,.15)), url('https://images.unsplash.com/photo-1640109341881-1cd3eaf50909?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080')",
+            "linear-gradient(rgba(0,0,0,.15), rgba(0,0,0,.15)), url('/signIn_signUp.jpg')",
         }}
       />
       {/* Mobile overlays + animated orbs for subtle depth */}
@@ -281,7 +281,7 @@ export default function SignIn() {
           className="w-full h-full bg-black rounded-3xl p-12 flex items-center justify-center relative overflow-hidden bg-cover bg-center"
           style={{
             backgroundImage:
-              "linear-gradient(rgba(0,0,0,.72), rgba(0,0,0,.72)), url('https://images.unsplash.com/photo-1759884247264-86c2aa311632?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1600')",
+              "linear-gradient(rgba(0,0,0,.72), rgba(0,0,0,.72)), url('/signIn_signUp.jpg')",
           }}
         >
           {/* Decorative blur glows */}

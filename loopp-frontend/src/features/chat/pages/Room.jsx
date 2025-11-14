@@ -6,6 +6,7 @@ import { connectSocket, getSocket, joinRoom } from "@/lib/socket";
 import chatApi from "@/services/chat.service";
 import projects from "@/services/projects.service";
 import invoices from "@/services/invoice.service";
+import meetings from "@/services/meetings.service";
 
 import ConversationList from "../components/ConversationList";
 import ChatHeader from "../components/ChatHeader";
@@ -17,7 +18,8 @@ import InlineNotification from "@/features/chat/components/InlineNotification";
 import ChatBackground from "@/features/chat/components/ChatBackground";
 import UnreadMessagesIndicator from "@/features/chat/components/UnreadMessagesIndicator";
 import InvoiceModal from "../components/InvoiceModal";
-// import ZoomModal from "../components/ZoomModal"; // ⛔️ disabled
+import { apiClient } from "../../../services/http";
+import MeetModal from "../components/MeetModal";
 
 // consider two times "close" if within N ms
 const closeInTime = (aISO, bISO, ms = 10000) => {
@@ -32,11 +34,12 @@ function reconcileMineWithoutNonce(prev, shaped) {
 
   const idx = [...prev]
     .reverse()
-    .findIndex((m) =>
-      m.isMine &&
-      (m.status === "pending" || m.status === "sent") &&
-      (m.content || "").trim() === (shaped.content || "").trim() &&
-      closeInTime(m.createdAtISO, shaped.createdAtISO, 15000)
+    .findIndex(
+      (m) =>
+        m.isMine &&
+        (m.status === "pending" || m.status === "sent") &&
+        (m.content || "").trim() === (shaped.content || "").trim() &&
+        closeInTime(m.createdAtISO, shaped.createdAtISO, 15000)
     );
 
   if (idx === -1) return prev;
@@ -117,7 +120,8 @@ function roleToTheme(role, isMine) {
   return "user";
 }
 function previewText(m) {
-  if (m.attachments?.length && !m.content) return `📎 ${m.attachments.length} attachment(s)`;
+  if (m.attachments?.length && !m.content)
+    return `📎 ${m.attachments.length} attachment(s)`;
   return m.content || "—";
 }
 
@@ -152,11 +156,13 @@ const localUrlRegistry = {
   revokeAll(ref) {
     if (ref.current) {
       for (const u of ref.current) {
-        try { URL.revokeObjectURL(u); } catch {}
+        try {
+          URL.revokeObjectURL(u);
+        } catch {}
       }
       ref.current.clear();
     }
-  }
+  },
 };
 
 function buildOptimisticAttachments(files, regRef) {
@@ -169,8 +175,8 @@ function buildOptimisticAttachments(files, regRef) {
       name: f.name,
       size: f.size,
       type: f.type,
-      url,            // local preview
-      isLocal: true,  // mark as local
+      url, // local preview
+      isLocal: true, // mark as local
     };
   });
 }
@@ -179,21 +185,20 @@ function normalizeIncoming(m, meId, dir = {}) {
   const rawSender = m.sender || m.user || {};
   const senderId = (
     typeof rawSender === "string" ? rawSender : rawSender._id || rawSender.id || ""
-  ).toString();
+  )
+    .toString();
 
-  const lookup = (senderId && dir[senderId]) ? dir[senderId] : {};
+  const lookup = senderId && dir[senderId] ? dir[senderId] : {};
 
-  const clientName  = (m.clientName || "").toString().trim();
+  const clientName = (m.clientName || "").toString().trim();
   const clientEmail = (m.clientEmail || "").toString().trim();
 
   const first = (rawSender.firstName ?? lookup.firstName ?? "").toString().trim();
-  const last  = (rawSender.lastName  ?? lookup.lastName  ?? "").toString().trim();
+  const last = (rawSender.lastName ?? lookup.lastName ?? "").toString().trim();
 
-  const email = (
-    rawSender.email ?? lookup.email ?? clientEmail ?? ""
-  ).toString().trim();
+  const email = (rawSender.email ?? lookup.email ?? clientEmail ?? "").toString().trim();
 
-  const full  = [first, last].filter(Boolean).join(" ");
+  const full = [first, last].filter(Boolean).join(" ");
   const explicitName = (m.senderName || "").toString().trim();
   const username = (rawSender.username || "").toString().trim();
 
@@ -220,7 +225,10 @@ function normalizeIncoming(m, meId, dir = {}) {
     _id: m._id || m.id || `${Date.now()}-${Math.random()}`,
     room: (m.room && (m.room._id || m.room)) || "",
     content: m.text || m.content || "",
-    timestamp: new Date(created).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    timestamp: new Date(created).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
     createdAtISO: new Date(created).toISOString(),
 
     senderName,
@@ -231,9 +239,9 @@ function normalizeIncoming(m, meId, dir = {}) {
     sender: {
       _id: senderId || undefined,
       firstName: first || undefined,
-      lastName:  last  || undefined,
-      email:     email || undefined,
-      role
+      lastName: last || undefined,
+      email: email || undefined,
+      role,
     },
 
     clientName: clientName || undefined,
@@ -247,6 +255,8 @@ function normalizeIncoming(m, meId, dir = {}) {
     readAt: m.readAt || null,
 
     visibleTo: normalizeVisibleTo(m.visibleTo),
+    allowRating: !!m.allowRating,
+    ratingRequestId: m.ratingRequestId || null,
   };
 
   shaped.bubbleTheme = roleToTheme(role, isMine);
@@ -260,7 +270,9 @@ function safeAppend(setMessages, incoming) {
 
     // secondary: nonce match
     if (incoming.clientNonce) {
-      const nIdx = prev.findIndex((x) => x.clientNonce && x.clientNonce === incoming.clientNonce);
+      const nIdx = prev.findIndex(
+        (x) => x.clientNonce && x.clientNonce === incoming.clientNonce
+      );
       if (nIdx !== -1) {
         const next = prev.slice();
         next[nIdx] = {
@@ -334,7 +346,84 @@ const formatDateSeparator = (date) => {
 
   const diffDays = Math.floor((+today - +date) / (1000 * 60 * 60 * 24));
   if (diffDays < 7) return date.toLocaleDateString([], { weekday: "long" });
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+/* --------------------- conversation sidebar time formatting --------------------- */
+const formatConversationTime = (iso) => {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+  const diffMs = startOfToday - startOfDate;
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) {
+    // today -> time
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  if (diffDays === 1) {
+    return "Yesterday";
+  }
+  if (diffDays < 7 && diffDays > 1) {
+    return date.toLocaleDateString([], { weekday: "long" });
+  }
   return date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+};
+
+const formatMeetRange = (startISO, endISO) => {
+  if (!startISO) return "Time TBD";
+
+  const start = new Date(startISO);
+  const end = endISO ? new Date(endISO) : null;
+
+  if (Number.isNaN(start.getTime())) return "Time TBD";
+
+  const sameDay =
+    end &&
+    start.getFullYear() === end.getFullYear() &&
+    start.getMonth() === end.getMonth() &&
+    start.getDate() === end.getDate();
+
+  const datePart = start.toLocaleDateString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+
+  const startTime = start.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  if (!end || Number.isNaN(end.getTime())) {
+    return `${datePart} • ${startTime}`;
+  }
+
+  const endTime = end.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  if (sameDay) {
+    return `${datePart} • ${startTime}–${endTime}`;
+  }
+
+  // different day (rare, but just in case)
+  const endDatePart = end.toLocaleDateString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+  return `${datePart} ${startTime} → ${endDatePart} ${endTime}`;
 };
 
 /* ------------------------------- map to list ------------------------------- */
@@ -355,7 +444,7 @@ const toConversation = (typingByRoom) => (r) => {
     name: shortName(r.title),
     avatar: "",
     lastMessage: r.lastMessage || "",
-    time: new Date(r.updatedAtISO).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    time: formatConversationTime(r.updatedAtISO),
     unreadCount: r.unreadCount || 0,
     isOnline: !r.isClosed,
     isPinned: false,
@@ -368,13 +457,24 @@ function ErrorScreen({ kind, title, message, onRefresh, onRetry, retryLabel = "T
   return (
     <div className="h-screen w-full flex flex-col items-center justify-center bg-gradient-to-b from-gray-50 to-white px-6 text-center">
       <div className="relative mb-6">
-        <svg viewBox="0 0 64 64" className="w-20 h-20 text-gray-400 animate-spin-slow" style={{ animationDuration: "6s" }}>
+        <svg
+          viewBox="0 0 64 64"
+          className="w-20 h-20 text-gray-400 animate-spin-slow"
+          style={{ animationDuration: "6s" }}
+        >
           <g fill="currentColor">
-            <path d="M27 4h10l1.2 5.4 5.1 2.1 4.3-3.5 7.1 7.1-3.5 4.3 2.1 5.1L60 27v10l-5.4 1.2-2.1 5.1 3.5 4.3-7.1 7.1-4.3-3.5-5.1 2.1L37 60H27l-1.2-5.4-5.1-2.1-4.3 3.5-7.1-7.1 3.5-4.3-2.1-5.1L4 37V27l5.4-1.2 2.1-5.1-3.5-4.3 7.1-7.1 4.3 3.5 5.1-2.1L27 4zm5 16a12 12 0 100 24 12 12 0 000-24z"/>
+            <path d="M27 4h10l1.2 5.4 5.1 2.1 4.3-3.5 7.1 7.1-3.5 4.3 2.1 5.1L60 27v10l-5.4 1.2-2.1 5.1 3.5 4.3-7.1 7.1-4.3-3.5-5.1 2.1L37 60H27l-1.2-5.4-5.1-2.1-4.3 3.5-7.1-7.1 3.5-4.3-2.1-5.1L4 37V27l5.4-1.2 2.1-5.1-3.5-4.3 7.1-7.1 4.3 3.5 5.1-2.1L27 4zm5 16a12 12 0 100 24 12 12 0 000-24z" />
           </g>
         </svg>
-        <svg viewBox="0 0 64 64" className="w-20 h-20 text-gray-500 absolute -bottom-4 -right-6 animate-bounce-slow" style={{ animationDuration: "2.5s" }}>
-          <path fill="currentColor" d="M50 10a10 10 0 00-9.7 7.5l6.2 6.2a3 3 0 01-4.2 4.2l-6.2-6.2A10 10 0 1050 10zM21 43l-9 9a3 3 0 004.2 4.2l9-9a10.7 10.7 0 01-4.2-4.2z"/>
+        <svg
+          viewBox="0 0 64 64"
+          className="w-20 h-20 text-gray-500 absolute -bottom-4 -right-6 animate-bounce-slow"
+          style={{ animationDuration: "2.5s" }}
+        >
+          <path
+            fill="currentColor"
+            d="M50 10a10 10 0 00-9.7 7.5l6.2 6.2a3 3 0 01-4.2 4.2l-6.2-6.2A10 10 0 1050 10zM21 43l-9 9a3 3 0 004.2 4.2l9-9a10.7 10.7 0 01-4.2-4.2z"
+          />
         </svg>
       </div>
 
@@ -382,9 +482,12 @@ function ErrorScreen({ kind, title, message, onRefresh, onRetry, retryLabel = "T
       <p className="mt-2 max-w-xl text-sm sm:text-base text-gray-600">{message}</p>
 
       <div className="mt-4 text-xs text-gray-500">
-        {kind === "SOCKET_TIMEOUT" && "Hint: If you’re on a slow or flaky connection, a quick refresh usually fixes it."}
-        {kind === "JOIN_FAILED" && "Hint: The room may have briefly dropped. Rejoin to pick up right where you left off."}
-        {kind === "GENERIC" && "Hint: You can refresh the page, or try again in a moment."}
+        {kind === "SOCKET_TIMEOUT" &&
+          "Hint: If you’re on a slow or flaky connection, a quick refresh usually fixes it."}
+        {kind === "JOIN_FAILED" &&
+          "Hint: The room may have briefly dropped. Rejoin to pick up right where you left off."}
+        {kind === "GENERIC" &&
+          "Hint: You can refresh the page, or try again in a moment."}
       </div>
 
       <div className="mt-6 flex items-center gap-3">
@@ -394,7 +497,12 @@ function ErrorScreen({ kind, title, message, onRefresh, onRetry, retryLabel = "T
             className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold bg-black text-white hover:bg-black/90 active:scale-[.98] transition"
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M9 7V3m6 4V3M7 14h10m-9 0v2a5 5 0 0010 0v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+              <path
+                d="M9 7V3m6 4V3M7 14h10m-9 0v2a5 5 0 0010 0v-2"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
             </svg>
             {retryLabel}
           </button>
@@ -404,7 +512,12 @@ function ErrorScreen({ kind, title, message, onRefresh, onRetry, retryLabel = "T
           className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold border border-gray-300 bg-white hover:bg-gray-50 active:scale-[.98] transition"
         >
           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 10.002 8.002" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+            <path
+              d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 10.002 8.002"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
           </svg>
           Refresh Page
         </button>
@@ -430,12 +543,23 @@ function ErrorScreen({ kind, title, message, onRefresh, onRetry, retryLabel = "T
   );
 }
 
+async function connectGoogleAccount() {
+  const { data } = await apiClient.get("/google/oauth2/connect");
+  if (data?.url) {
+    // small delay so the user can read the toast
+    setTimeout(() => {
+      window.open(data.url, "_blank", "width=600,height=700");
+    }, 2000);
+  }
+}
+
 /* ===================================== Room ===================================== */
 export default function Room() {
   const user = useSelector((s) => s.auth.user);
   const [memberDir, setMemberDir] = useState({});
   const userId = user?._id || user?.id;
   const userRole = normalizeRole((user?.role || "User").toString());
+  const [showMeetModal, setShowMeetModal] = useState(false);
   const userName =
     [user?.firstName || user?.first_name, user?.lastName || user?.last_name]
       .filter(Boolean)
@@ -458,7 +582,6 @@ export default function Room() {
 
   // PM actions
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
-  // const [showZoomModal, setShowZoomModal] = useState(false); // ⛔️ disabled
 
   // UI-only state
   const [showSidebar, setShowSidebar] = useState(false);
@@ -478,6 +601,25 @@ export default function Room() {
 
   // trigger rejoin attempts
   const [rejoinTick, setRejoinTick] = useState(0);
+
+  // simple toast helper
+  const pushNotification = (notif) => {
+    const id =
+      notif.id || `n-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const item = {
+      id,
+      type: notif.type || "info",
+      message: notif.message || "",
+      timestamp:
+        notif.timestamp ||
+        new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+    setNotifications((prev) => [...prev, item]);
+    // auto-dismiss after 4s
+    setTimeout(() => {
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
+    }, 4000);
+  };
 
   useEffect(() => {
     return () => {
@@ -529,7 +671,8 @@ export default function Room() {
 
         list.sort(
           (a, b) =>
-            new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime()
+            new Date(b.updatedAt || b.createdAt || 0).getTime() -
+            new Date(a.updatedAt || a.createdAt || 0).getTime()
         );
 
         if (!mounted) return;
@@ -541,7 +684,9 @@ export default function Room() {
         setRooms(mapped);
         if (!activeRoomId && mapped.length) setActiveRoomId(mapped[0].id);
       } catch (e) {
-        setErr(e?.response?.data?.message || e?.message || "Failed to load rooms");
+        setErr(
+          e?.response?.data?.message || e?.message || "Failed to load rooms"
+        );
         setRooms([]);
       } finally {
         if (mounted) setLoading(false);
@@ -570,7 +715,10 @@ export default function Room() {
           await waitForSocketConnected(getSocket());
         } catch (e) {
           if (cancelled) return;
-          setFatal({ kind: "SOCKET_TIMEOUT", message: e?.message || "Socket connect timeout" });
+          setFatal({
+            kind: "SOCKET_TIMEOUT",
+            message: e?.message || "Socket connect timeout",
+          });
           return;
         }
 
@@ -580,7 +728,10 @@ export default function Room() {
           if (cancelled) return;
           setFatal({
             kind: "JOIN_FAILED",
-            message: e?.response?.data?.message || e?.message || "Failed to join room",
+            message:
+              e?.response?.data?.message ||
+              e?.message ||
+              "Failed to join room",
           });
           return;
         }
@@ -590,9 +741,7 @@ export default function Room() {
         // messages
         const { data } = await chatApi.getMessages(activeRoomId);
         const list = Array.isArray(data?.messages) ? data.messages : [];
-        const normalized = list
-          .map((m) => normalizeIncoming(m, userId))
-          .filter(Boolean);
+        const normalized = list.map((m) => normalizeIncoming(m, userId)).filter(Boolean);
         setMessages(normalized);
 
         // project meta
@@ -617,7 +766,7 @@ export default function Room() {
             metaProject = {
               ...full,
               _id: full?._id || full?.id || metaProject?._id || null,
-              hasRatings: !!full?.ratings || (metaProject?.hasRatings || false),
+              hasRatings: !!full?.ratings || metaProject?.hasRatings || false,
               reopenRequested:
                 typeof full?.reopenRequested === "boolean"
                   ? full.reopenRequested
@@ -648,14 +797,22 @@ export default function Room() {
           setRooms((prev) =>
             prev.map((r) =>
               r.id === activeRoomId
-                ? { ...r, lastMessage: previewText(last), updatedAtISO: last.createdAtISO }
+                ? {
+                    ...r,
+                    lastMessage: previewText(last),
+                    updatedAtISO: last.createdAtISO,
+                  }
                 : r
             )
           );
         }
 
         clearUnread(userId, activeRoomId);
-        setRooms((prev) => prev.map((r) => (r.id === activeRoomId ? { ...r, unreadCount: 0 } : r)));
+        setRooms((prev) =>
+          prev.map((r) =>
+            r.id === activeRoomId ? { ...r, unreadCount: 0 } : r
+          )
+        );
 
         requestAnimationFrame(() => {
           const el = scrollerRef.current;
@@ -678,7 +835,10 @@ export default function Room() {
             if (shaped.clientNonce) {
               setMessages((prev) => {
                 const idx = prev.findIndex(
-                  (x) => x.isMine && x.clientNonce && x.clientNonce === shaped.clientNonce
+                  (x) =>
+                    x.isMine &&
+                    x.clientNonce &&
+                    x.clientNonce === shaped.clientNonce
                 );
                 if (idx !== -1) {
                   const prevMsg = prev[idx];
@@ -687,7 +847,9 @@ export default function Room() {
                   if (prevMsg.attachments?.length) {
                     for (const a of prevMsg.attachments) {
                       if (a?.isLocal && a?.url) {
-                        try { URL.revokeObjectURL(a.url); } catch {}
+                        try {
+                          URL.revokeObjectURL(a.url);
+                        } catch {}
                         localUrlsRef.current.delete(a.url);
                       }
                     }
@@ -698,7 +860,8 @@ export default function Room() {
                     _id: shaped._id,
                     status: "delivered",
                     deliveredAt: shaped.deliveredAt || new Date().toISOString(),
-                    createdAtISO: shaped.createdAtISO || prevMsg.createdAtISO,
+                    createdAtISO:
+                      shaped.createdAtISO || prevMsg.createdAtISO,
                     timestamp: shaped.timestamp || prevMsg.timestamp,
                     attachments: shaped.attachments || prevMsg.attachments || [],
                     visibleTo: shaped.visibleTo || prevMsg.visibleTo || "All",
@@ -738,7 +901,11 @@ export default function Room() {
                   lastMessage: previewText(shaped),
                   updatedAtISO: shaped.createdAtISO,
                 };
-                updated = [r1, ...updated.slice(0, idx), ...updated.slice(idx + 1)];
+                updated = [
+                  r1,
+                  ...updated.slice(0, idx),
+                  ...updated.slice(idx + 1),
+                ];
               }
               return updated;
             });
@@ -747,7 +914,9 @@ export default function Room() {
               incUnread(userId, rid);
               setRooms((prev) =>
                 prev.map((r) =>
-                  r.id === rid ? { ...r, unreadCount: unreadCountFor(userId, rid) } : r
+                  r.id === rid
+                    ? { ...r, unreadCount: unreadCountFor(userId, rid) }
+                    : r
                 )
               );
               return;
@@ -771,6 +940,19 @@ export default function Room() {
           } else {
             setUnreadFloatCount((c) => c + 1);
           }
+
+          // update sidebar lastMessage / updatedAt for active room
+          setRooms((prev) =>
+            prev.map((r) =>
+              r.id === rid
+                ? {
+                    ...r,
+                    lastMessage: previewText(shaped),
+                    updatedAtISO: shaped.createdAtISO,
+                  }
+                : r
+            )
+          );
         };
 
         const onTyping = ({ roomId, userId: uid, role, isTyping }) => {
@@ -787,11 +969,17 @@ export default function Room() {
         const onDelivered = ({ messageId, clientNonce }) => {
           setMessages((prev) => {
             const idx = prev.findIndex(
-              (m) => (clientNonce && m.clientNonce === clientNonce) || m._id === messageId
+              (m) =>
+                (clientNonce && m.clientNonce === clientNonce) ||
+                m._id === messageId
             );
             if (idx === -1) return prev;
             const next = prev.slice();
-            next[idx] = { ...next[idx], status: "delivered", deliveredAt: new Date().toISOString() };
+            next[idx] = {
+              ...next[idx],
+              status: "delivered",
+              deliveredAt: new Date().toISOString(),
+            };
             return next;
           });
         };
@@ -803,7 +991,11 @@ export default function Room() {
             const next = prev.map((m) => {
               if (messageIds.includes(m._id) && m.status !== "read") {
                 changed = true;
-                return { ...m, status: "read", readAt: new Date().toISOString() };
+                return {
+                  ...m,
+                  status: "read",
+                  readAt: new Date().toISOString(),
+                };
               }
               return m;
             });
@@ -812,7 +1004,9 @@ export default function Room() {
         };
 
         const onRated = ({ ratings }) =>
-          setProject((p) => (p ? { ...p, ratings: ratings || p.ratings, hasRatings: true } : p));
+          setProject((p) =>
+            p ? { ...p, ratings: ratings || p.ratings, hasRatings: true } : p
+          );
 
         const onRoomClosed = ({ roomId }) => {
           if (String(roomId) !== String(activeRoomId)) return;
@@ -821,7 +1015,9 @@ export default function Room() {
         const onRoomReopened = ({ roomId }) => {
           if (String(roomId) !== String(activeRoomId)) return;
           setRoomClosed(false);
-          setProject((p) => (p ? { ...p, reopenRequested: false, status: "In-Progress" } : p));
+          setProject((p) =>
+            p ? { ...p, reopenRequested: false, status: "In-Progress" } : p
+          );
         };
 
         const onReopenRequested = ({ roomId }) => {
@@ -849,7 +1045,10 @@ export default function Room() {
         s2?.on("reopen:requested", onReopenRequested);
       } catch (e) {
         if (!cancelled) {
-          setFatal({ kind: "GENERIC", message: e?.message || "Failed to join chat" });
+          setFatal({
+            kind: "GENERIC",
+            message: e?.message || "Failed to join chat",
+          });
         }
       } finally {
         setJoining(false);
@@ -871,6 +1070,21 @@ export default function Room() {
   const canShowClose = userRole === "PM" && rated && !roomClosed;
   const canShowReopen = userRole === "PM" && roomClosed && !!project?.reopenRequested;
 
+    // PM can only request rating when project is in Review and not already fully rated
+  const canRequestRating = useMemo(() => {
+    if (userRole !== "PM") return false;
+    const status = (project?.status || "").toString().toLowerCase();
+
+    // if we already have ratings recorded, don't allow another request
+    if (project?.hasRatings) return false;
+    const pmScore = project?.ratings?.pm?.score;
+    const engScore = project?.ratings?.engineer?.score;
+    const alreadyRated = !!(pmScore && engScore);
+    if (alreadyRated) return false;
+
+    return status === "review";
+  }, [userRole, project]);
+
   /* ----------------------------- presence counts ----------------------------- */
   const presence = useMemo(() => {
     const map = new Map();
@@ -880,11 +1094,19 @@ export default function Room() {
       if (!m?.senderName) continue;
       const key = m.senderName + "|" + (m.senderRole || "");
       const last = new Date(m.createdAtISO || Date.now()).getTime();
-      const prev = map.get(key) || { name: m.senderName, role: m.senderRole, last: 0 };
+      const prev = map.get(key) || {
+        name: m.senderName,
+        role: m.senderRole,
+        last: 0,
+      };
       if (last > prev.last) map.set(key, { name: m.senderName, role: m.senderRole, last });
     }
 
-    map.set(userName + "|" + userRole, { name: userName, role: userRole, last: now });
+    map.set(userName + "|" + userRole, {
+      name: userName,
+      role: userRole,
+      last: now,
+    });
 
     const typers = Object.values(typingByRoom[activeRoomId] || {});
     const typingRoles = typers.map((t) => t.role);
@@ -928,21 +1150,165 @@ export default function Room() {
   const commands = useMemo(() => {
     if (userRole !== "PM") return [];
     return [
-      { id: "invoice", title: "Generate an invoice", subtitle: "Create a Stripe hosted invoice for this project", hint: "invoice" },
-      // { id: "zoom", title: "Generate a Zoom meeting link", subtitle: "Create an instant Zoom room for this project", hint: "zoom" }, // ⛔️ disabled
+      {
+        id: "invoice",
+        title: "Generate an invoice",
+        subtitle: "Create a Stripe hosted invoice for this project",
+        hint: "invoice",
+      },
+      {
+        id: "meet",
+        title: "Create Google Meet link",
+        subtitle: "Generate a meeting link anyone in this room can join",
+        hint: "meet",
+      },
+      {
+        id: "rate",
+        title: "Ask client to rate project",
+        subtitle: "Send a Rate us button only visible to the client",
+        hint: "rate",
+      },
     ];
   }, [userRole]);
+
+  const getProjectId = () => project?._id || project?.id || null;
+
+  const createMeetWithTimes = async ({ startISO, endISO }) => {
+    if (!activeRoomId) return;
+    const pid = getProjectId();
+
+    const createdAtISO = new Date().toISOString();
+    const clientNonce = genClientNonce();
+    const tempId = `tmp-meet-${clientNonce}`;
+
+    try {
+      const { data } = await meetings.createGoogleMeet({
+        projectId: pid,
+        roomId: activeRoomId,
+        startISO,
+        endISO,
+      });
+
+      const url = data?.joinUrl || data?.meetUrl;
+      if (!url) throw new Error("No Google Meet URL returned from server.");
+
+      const whenLabel = formatMeetRange(startISO, endISO);
+      const text = `📅 Google Meet • ${whenLabel} — ${url}`;
+
+      const optimistic = {
+        _id: tempId,
+        room: activeRoomId,
+        content: text,
+        attachments: [],
+        createdAtISO,
+        timestamp: new Date(createdAtISO).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        senderName: userName,
+        senderRole: userRole,
+        senderType: userRole,
+        isMine: true,
+        bubbleTheme: "me",
+        status: "pending",
+        clientNonce,
+        deliveredAt: null,
+        readAt: null,
+        visibleTo: "All",
+      };
+
+      setMessages((prev) => [...prev, optimistic]);
+
+      requestAnimationFrame(() => {
+        scrollerRef.current?.scrollTo({
+          top: scrollerRef.current.scrollHeight,
+          behavior: "smooth",
+        });
+      });
+
+      await chatApi.send({
+        roomId: activeRoomId,
+        text,
+        clientNonce,
+        visibleTo: "All",
+      });
+
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m._id === tempId);
+        if (idx === -1) return prev;
+        const next = prev.slice();
+        next[idx] = { ...next[idx], status: "sent" };
+        return next;
+      });
+
+      pushNotification({
+        type: "success",
+        message: "Google Meet link created",
+      });
+    } catch (e) {
+      const msg = e?.response?.data?.message || e?.message || "";
+
+      if (msg.includes("Please connect your Google account in Loopp")) {
+        // show toast, then after 2s open OAuth window
+        pushNotification({
+          type: "error",
+          message:
+            "Connect your Google account first. We’ll open a Google window in a moment.",
+        });
+        await connectGoogleAccount();
+        return;
+      }
+
+      setErr(msg || "Failed to create Google Meet");
+    }
+  };
 
   const handleRunCommand = async (cmd) => {
     try {
       if (!activeRoomId) return;
+
       if (cmd.id === "invoice") {
         setShowInvoiceModal(true);
         return;
       }
-      // if (cmd.id === "zoom") { setShowZoomModal(true); return; } // ⛔️ disabled
+
+      if (cmd.id === "meet") {
+        // Just open the time picker; actual creation happens on modal submit
+        setShowMeetModal(true);
+        return;
+      }
+
+       if (cmd.id === "rate") {
+        // ⛔ enforce: only when project.status === "Review"
+        if (!canRequestRating) {
+          pushNotification({
+            type: "info",
+            message:
+              "You can only request a rating when the project status is Review and not already rated.",
+          });
+          return;
+        }
+
+        try {
+          await apiClient.post(`/chat/rooms/${activeRoomId}/rating-prompt`);
+
+          pushNotification({
+            type: "success",
+            message: "Rate-us request sent to client",
+          });
+        } catch (e) {
+          setErr(
+            e?.response?.data?.message ||
+              e?.message ||
+              "Failed to send rating request"
+          );
+        }
+        return;
+      }
     } catch (e) {
-      setErr(e?.response?.data?.message || e?.message || "Failed to run command");
+      setErr(
+        e?.response?.data?.message || e?.message || "Failed to run command"
+      );
     }
   };
 
@@ -991,7 +1357,10 @@ export default function Room() {
       content: trimmed,
       attachments: optimisticAttachments,
       createdAtISO,
-      timestamp: new Date(createdAtISO).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      timestamp: new Date(createdAtISO).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
       senderName: userName,
       senderRole: userRole,
       senderType: userRole,
@@ -1034,7 +1403,14 @@ export default function Room() {
         const idx = prev.findIndex((m) => m._id === tempId);
         if (idx === -1) return prev;
         const next = prev.slice();
-        next[idx] = { ...next[idx], status: "failed", error: e?.response?.data?.message || e?.message || "Failed to send" };
+        next[idx] = {
+          ...next[idx],
+          status: "failed",
+          error:
+            e?.response?.data?.message ||
+            e?.message ||
+            "Failed to send",
+        };
         return next;
       });
       setErr(e?.response?.data?.message || e?.message || "Failed to send");
@@ -1044,7 +1420,13 @@ export default function Room() {
   const retrySend = async (message) => {
     if (!message || message.status !== "failed") return;
     try {
-      setMessages((prev) => prev.map((m) => (m._id === message._id ? { ...m, status: "pending", error: undefined } : m)));
+      setMessages((prev) =>
+        prev.map((m) =>
+          m._id === message._id
+            ? { ...m, status: "pending", error: undefined }
+            : m
+        )
+      );
       await chatApi.send({
         roomId: message.room,
         text: message.content,
@@ -1052,9 +1434,19 @@ export default function Room() {
         clientNonce: message.clientNonce,
         visibleTo: message.visibleTo || "All",
       });
-      setMessages((prev) => prev.map((m) => (m._id === message._id ? { ...m, status: "sent" } : m)));
+      setMessages((prev) =>
+        prev.map((m) =>
+          m._id === message._id ? { ...m, status: "sent" } : m
+        )
+      );
     } catch (e) {
-      setMessages((prev) => prev.map((m) => (m._id === message._id ? { ...m, status: "failed", error: e?.message || "Failed again" } : m)));
+      setMessages((prev) =>
+        prev.map((m) =>
+          m._id === message._id
+            ? { ...m, status: "failed", error: e?.message || "Failed again" }
+            : m
+        )
+      );
     }
   };
 
@@ -1069,8 +1461,6 @@ export default function Room() {
       name: userName,
     });
   };
-
-  const getProjectId = () => project?._id || project?.id || null;
 
   const handleCloseRoom = async () => {
     try {
@@ -1087,10 +1477,14 @@ export default function Room() {
       const pid = getProjectId();
       if (!pid) return;
       await projects.reopen({ requestId: pid });
-      setProject((p) => (p ? { ...p, reopenRequested: false, status: "In-Progress" } : p));
+      setProject((p) =>
+        p ? { ...p, reopenRequested: false, status: "In-Progress" } : p
+      );
       setRoomClosed(false);
     } catch (e) {
-      setErr(e?.response?.data?.message || e?.message || "Failed to reopen room");
+      setErr(
+        e?.response?.data?.message || e?.message || "Failed to reopen room"
+      );
     }
   };
 
@@ -1134,15 +1528,15 @@ export default function Room() {
       kind === "SOCKET_TIMEOUT"
         ? "Your connection took too long"
         : kind === "JOIN_FAILED"
-          ? "We couldn’t join the room"
-          : "Something broke while connecting";
+        ? "We couldn’t join the room"
+        : "Something broke while connecting";
 
     const copy =
       kind === "SOCKET_TIMEOUT"
         ? "It looks like your network is a bit slow and the chat socket couldn’t connect in time. Click Refresh to reload, or Try Again to reconnect now."
         : kind === "JOIN_FAILED"
-          ? "The room briefly went out of sync and we couldn’t join. Your network may have dropped for a moment. Rejoin to continue chatting, or refresh the page."
-          : "Your chat session lost its connection. You can refresh the page or try again.";
+        ? "The room briefly went out of sync and we couldn’t join. Your network may have dropped for a moment. Rejoin to continue chatting, or refresh the page."
+        : "Your chat session lost its connection. You can refresh the page or try again.";
 
     return (
       <ErrorScreen
@@ -1156,9 +1550,19 @@ export default function Room() {
     );
   }
 
-  const conversations = rooms.map(toConversation(typingByRoom));
+  // conversation list: always sort by most recent updatedAtISO
+  const conversations = [...rooms]
+    .sort(
+      (a, b) =>
+        new Date(b.updatedAtISO || 0).getTime() -
+        new Date(a.updatedAtISO || 0).getTime()
+    )
+    .map(toConversation(typingByRoom));
+
   const headerContact = {
-    name: shortName(rooms.find((r) => r.id === activeRoomId)?.title || "Team Chat"),
+    name: shortName(
+      rooms.find((r) => r.id === activeRoomId)?.title || "Team Chat"
+    ),
     status: roomClosed ? "Closed" : typingText || (joining ? "Joining…" : "Online"),
     avatar: "",
     isOnline: !joining && !roomClosed,
@@ -1173,10 +1577,23 @@ export default function Room() {
           className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full transition bg-black text-white hover:bg-black/90"
           title="Back"
         >
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <svg
+            className="w-4 h-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M15 6l-6 6 6 6"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
-          <span className="hidden sm:inline text-sm font-medium">Dashboard</span>
+          <span className="hidden sm:inline text-sm font-medium">
+            Dashboard
+          </span>
         </Link>
 
         <div className="text-sm font-medium text-gray-600">Team Chat</div>
@@ -1213,7 +1630,11 @@ export default function Room() {
         </aside>
 
         {/* Chat Area */}
-        <section className={`relative flex-1 min-w-0 flex flex-col overflow-hidden min-h-0 ${!activeRoomId && "hidden sm:flex"} bg-gray-50`}>
+        <section
+          className={`relative flex-1 min-w-0 flex flex-col overflow-hidden min-h-0 ${
+            !activeRoomId && "hidden sm:flex"
+          } bg-gray-50`}
+        >
           <ChatBackground variant="staff" />
 
           {activeRoomId ? (
@@ -1239,8 +1660,14 @@ export default function Room() {
                       const el = messageRefs.current[msg._id];
                       if (el) {
                         setHighlightedMessageId(msg._id);
-                        el.scrollIntoView({ behavior: "smooth", block: "center" });
-                        setTimeout(() => setHighlightedMessageId(null), 1800);
+                        el.scrollIntoView({
+                          behavior: "smooth",
+                          block: "center",
+                        });
+                        setTimeout(
+                          () => setHighlightedMessageId(null),
+                          1800
+                        );
                       }
                     }}
                   />
@@ -1314,7 +1741,10 @@ export default function Room() {
 
                       <div className="space-y-2">
                         {g.list.map((m) => (
-                          <div key={m._id} ref={(el) => (messageRefs.current[m._id] = el)}>
+                          <div
+                            key={m._id}
+                            ref={(el) => (messageRefs.current[m._id] = el)}
+                          >
                             <MessageBubble
                               message={m}
                               highlighted={highlightedMessageId === m._id}
@@ -1352,9 +1782,18 @@ export default function Room() {
                 <div className="px-4 pb-2 relative z-20">
                   <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs bg-white/90 backdrop-blur border-gray-200 text-gray-600">
                     <span className="flex gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full animate-bounce bg-gray-400" style={{ animationDelay: "0ms" }} />
-                      <span className="w-1.5 h-1.5 rounded-full animate-bounce bg-gray-400" style={{ animationDelay: "150ms" }} />
-                      <span className="w-1.5 h-1.5 rounded-full animate-bounce bg-gray-400" style={{ animationDelay: "300ms" }} />
+                      <span
+                        className="w-1.5 h-1.5 rounded-full animate-bounce bg-gray-400"
+                        style={{ animationDelay: "0ms" }}
+                      />
+                      <span
+                        className="w-1.5 h-1.5 rounded-full animate-bounce bg-gray-400"
+                        style={{ animationDelay: "150ms" }}
+                      />
+                      <span
+                        className="w-1.5 h-1.5 rounded-full animate-bounce bg-gray-400"
+                        style={{ animationDelay: "300ms" }}
+                      />
                     </span>
                     {typingText}
                   </div>
@@ -1368,12 +1807,7 @@ export default function Room() {
                     onTypingChange={handleTypingChange}
                     typingText=""
                     disabled={roomClosed}
-                    commands={userRole === "PM"
-                      ? [
-                          { id: "invoice", title: "Generate an invoice", subtitle: "Create a Stripe hosted invoice for this project", hint: "invoice" },
-                          // { id: "zoom", title: "Generate a Zoom meeting link", subtitle: "Create an instant Zoom room for this project", hint: "zoom" },
-                        ]
-                      : []}
+                    commands={commands}
                     onCommandRun={handleRunCommand}
                     role={userRole}
                   />
@@ -1387,7 +1821,10 @@ export default function Room() {
                       id: "err",
                       type: "error",
                       message: err,
-                      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                      timestamp: new Date().toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      }),
                     }}
                     onDismiss={() => setErr("")}
                   />
@@ -1433,7 +1870,10 @@ export default function Room() {
                 content: text,
                 attachments: [],
                 createdAtISO,
-                timestamp: new Date(createdAtISO).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                timestamp: new Date(createdAtISO).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                }),
                 senderName: userName,
                 senderRole: userRole,
                 senderType: userRole,
@@ -1474,58 +1914,79 @@ export default function Room() {
               });
 
               setShowInvoiceModal(false);
-              setNotifications((p) => [
-                ...p,
-                {
-                  id: `n-${Date.now()}`,
-                  type: "success",
-                  message: "Invoice created successfully",
-                  timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-                },
-              ]);
+              pushNotification({
+                type: "success",
+                message: "Invoice created successfully",
+              });
             } catch (e) {
-              setErr(e?.response?.data?.message || e?.message || "Failed to create invoice");
+              setErr(
+                e?.response?.data?.message ||
+                  e?.message ||
+                  "Failed to create invoice"
+              );
             }
           }}
         />
       )}
 
-      {/* ⛔️ Zoom disabled
-      {showZoomModal && userRole === "PM" && (
-        <ZoomModal
+      {showMeetModal && userRole === "PM" && (
+        <MeetModal
           projectTitle={project?.projectTitle}
-          onCancel={() => setShowZoomModal(false)}
-          onSubmit={async ({ topic, durationMinutes }) => {
+          onCancel={() => setShowMeetModal(false)}
+          onSubmit={async ({ startISO, endISO }) => {
             try {
-              const pid = project?._id || project?.id;
-              if (!pid) throw new Error("No project found for this room.");
-
-              const res = await meetings.createZoomMeeting({
-                projectId: pid,
-                topic,
-                durationMinutes,
-              });
-
-              const parts = [];
-              if (res.join_url) parts.push(`Join: ${res.join_url}`);
-              if (res.start_url) parts.push(`Host: ${res.start_url}`);
-              if (res.meeting_id) parts.push(`ID: ${res.meeting_id}`);
-              if (res.password) parts.push(`Passcode: ${res.password}`);
-
-              const msg = `🎥 Zoom meeting created — ${parts.join("  •  ")}`;
-              await chatApi.send({ roomId: activeRoomId, text: msg, visibleTo: "All" });
-
-              setShowZoomModal(false);
-              setNotifications((p) => [
-                ...p,
-                { id: `n-${Date.now()}`, type: "success", message: "Zoom meeting created", timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) },
-              ]);
+              await createMeetWithTimes({ startISO, endISO });
+              setShowMeetModal(false);
             } catch (e) {
-              setErr(e?.response?.data?.message || e?.message || "Failed to create Zoom meeting");
+              setErr(
+                e?.response?.data?.message ||
+                  e?.message ||
+                  "Failed to create Google Meet"
+              );
             }
           }}
         />
-      )} */}
+      )}
+
+      {/* Top-right toast notifications */}
+      <div className="pointer-events-none fixed top-4 right-4 z-[70] space-y-2">
+        {notifications.map((n) => (
+          <div
+            key={n.id}
+            className={`
+              pointer-events-auto max-w-xs rounded-xl px-4 py-3 text-sm shadow-lg
+              bg-white border
+              ${
+                n.type === "error"
+                  ? "border-red-200 text-red-800"
+                  : n.type === "success"
+                  ? "border-emerald-200 text-emerald-800"
+                  : "border-gray-200 text-gray-800"
+              }
+            `}
+          >
+            <div className="flex items-start gap-2">
+              <div className="mt-0.5">
+                {n.type === "error" ? "⚠️" : n.type === "success" ? "✅" : "💬"}
+              </div>
+              <div className="flex-1">
+                <div className="text-xs font-medium opacity-70">
+                  {n.timestamp}
+                </div>
+                <div>{n.message}</div>
+              </div>
+              <button
+                className="ml-1 text-xs text-gray-400 hover:text-gray-600"
+                onClick={() =>
+                  setNotifications((prev) => prev.filter((x) => x.id !== n.id))
+                }
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
